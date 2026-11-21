@@ -1,26 +1,68 @@
 # 09 — Vật Phẩm & Nâng Cấp (Items & Upgrades) — Asset Prompts
 
-- **Danh mục:** Vật phẩm, Ngọc linh lực, Kỹ năng chủ động & Buff nâng cấp (theo Checklist mở rộng)
+- **Danh mục:** Vật phẩm, Ngọc linh lực, Kỹ năng chủ động & Buff nâng cấp (3 prompts)
 - **Thư mục nhận raw:** `inbox/`
-- **Thư mục đích sau adapt:** `assets/sprites/items/` *(sẽ tự tạo khi adapt)*
+- **Thư mục đích sau adapt:** `assets/sprites/items/`
 - **Quy chuẩn chung:** Mỗi prompt tạo 1 ảnh gồm **6 icon subimages (`3×2`)** đồng bộ phong cách Edo chibi, nền trắng phẳng `#FFFFFF`, không đường kẻ lưới, không chữ.
 
 ---
 
 ## 1. Bộ Ngọc & Tiền Tệ Nâng Cấp (`items_gems_currency.png`) — [P2]
-*Gồm 6 subimages (`3×2`): Ngọc Magatama xanh (ngọc linh lực), Ngọc Magatama đỏ (ngọc sức mạnh), Đồng tiền vàng Koban thời Edo, Túi gấm Omamori may mắn, Hạt giống Đào tiên vàng, Rương gỗ sơn mài thưởng màn.*
 ```
-2D Japanese Edo-period chibi game items icon pack, 3 columns by 2 rows (6 equal-sized square cells), collectible currencies and upgrade gems centered in each cell. Cell 1: glowing jade-green curved Japanese Magatama spirit jewel with soft shimmer. Cell 2: fiery crimson-ruby curved Magatama power jewel. Cell 3: shiny oval Edo golden Koban coin stack tied with red cord. Cell 4: cute embroidered red-and-gold Japanese Omamori lucky charm pouch. Cell 5: radiant golden glowing sakura seed wrapped in magical aura. Cell 6: ornate red-and-gold lacquered Edo treasure chest slightly glowing at the lid. Hand-drawn 2D game art style, thick clean dark-brown ink outlines, vibrant glossy cel-shaded watercolor coloring. Pure flat solid white background (#FFFFFF), no grid lines, no borders, no text, no drop shadow on the background.
+Output file: inbox/items_gems_currency.png
+Asset: Bộ Ngọc & Tiền Tệ Nâng Cấp (Gems & Currency Icons Pack) — 6 Icons
+Grid: 3 columns × 2 rows (6 equal-sized square cells, 3:2 aspect ratio)
+
+Prompt:
+Create a 2D Japanese Edo-period chibi game items icon pack arranged in a strict 3 columns by 2 rows grid (6 cleanly separated equal-sized square cells, read left-to-right, top-to-bottom).
+Subimages (6 collectible currencies and upgrade gems centered in each cell):
+- Cell 1 (row 1, col 1): Glowing jade-green curved Japanese Magatama spirit jewel with soft luminous shimmer.
+- Cell 2 (row 1, col 2): Fiery crimson-ruby curved Magatama power jewel with warm sparkling highlights.
+- Cell 3 (row 1, col 3): Shiny oval Edo golden Koban coin stack neatly tied with red cord.
+- Cell 4 (row 2, col 1): Cute embroidered red-and-gold Japanese Omamori lucky charm pouch with tassel.
+- Cell 5 (row 2, col 2): Radiant golden glowing Sakura seed wrapped in magical pink-gold aura.
+- Cell 6 (row 2, col 3): Ornate red-and-gold lacquered Edo wooden treasure chest glowing warmly from its slightly cracked lid.
+Composition & Technical Rules: Center-aligned in every cell with generous margins and crisp readable silhouettes.
+Art Style: Hand-drawn 2D Edo chibi game art, thick clean dark-brown ink outlines, vibrant glossy cel-shaded watercolor coloring.
+Clean Output: Pure flat solid white background (#FFFFFF), no drop shadow on background, strictly NO grid lines, NO borders, NO text, NO numbers, NO watermarks.
 ```
 
 ## 2. Bộ Kỹ Năng Chủ Động & Buff Chiến Đấu (`items_skills_buffs.png`) — [P2]
-*Gồm 6 subimages (`3×2`): Quạt giấy lửa (Buff tăng sát thương), Trống Taiko (Buff tăng tốc bắn), Bình trà xanh Matcha (Hồi Linh Hỏa tức thì), Khiên gỗ gia huy (Buff tăng giáp toàn đội), Chuông gió Furin băng (Đóng băng toàn màn), Cuộn trục sấm sét (Sét đánh diện rộng).*
 ```
-2D Japanese Edo-period chibi game skill and buff icon pack, 3 columns by 2 rows (6 equal-sized square cells), active battle skills and temporary buff emblems centered in each cell. Cell 1: blazing red-and-gold folding war fan (Sensu) radiating fiery attack-up energy. Cell 2: festive Japanese Taiko war drum with drumsticks and golden speed-up shockwaves. Cell 3: steaming cute ceramic Japanese Matcha tea bowl with glowing spirit leaves (instant resource refill). Cell 4: sturdy round lacquered wooden Edo shield with golden sakura crest (defense-up buff). Cell 5: delicate glass Japanese Furin wind chime surrounded by sparkling frost snowflakes (global freeze skill). Cell 6: unrolled ancient mystic scroll crackling with bright yellow-cyan lightning bolts (thunderstorm skill). Hand-drawn 2D game art style, thick clean dark-brown ink outlines, vibrant luminous cel-shaded watercolor coloring. Pure flat solid white background (#FFFFFF), no grid lines, no borders, no text, no drop shadow on the background.
+Output file: inbox/items_skills_buffs.png
+Asset: Bộ Kỹ Năng Chủ Động & Buff Chiến Đấu (Active Skills & Buffs Pack) — 6 Icons
+Grid: 3 columns × 2 rows (6 equal-sized square cells, 3:2 aspect ratio)
+
+Prompt:
+Create a 2D Japanese Edo-period chibi game active skills and combat buffs icon pack arranged in a strict 3 columns by 2 rows grid (6 cleanly separated equal-sized square cells, read left-to-right, top-to-bottom).
+Subimages (6 battle skill and buff icons centered in each cell):
+- Cell 1 (row 1, col 1): Blazing red-and-gold folding war fan (Sensu) radiating fiery attack-boost energy.
+- Cell 2 (row 1, col 2): Festive Japanese Taiko war drum with wooden drumsticks and golden speed-up shockwaves.
+- Cell 3 (row 1, col 3): Steaming cute ceramic Japanese Matcha tea bowl with glowing emerald spirit leaves (instant Spirit Flame refill).
+- Cell 4 (row 2, col 1): Sturdy round lacquered wooden Edo shield with golden sakura crest (team defense buff).
+- Cell 5 (row 2, col 2): Delicate glass Japanese Furin wind chime surrounded by sparkling frost snowflakes (global freeze skill).
+- Cell 6 (row 2, col 3): Unrolled ancient mystic parchment scroll crackling with bright yellow-cyan lightning bolts (thunderstorm skill).
+Composition & Technical Rules: Center-aligned in every cell with generous margins and bold iconic silhouettes.
+Art Style: Hand-drawn 2D Edo chibi game art, thick clean dark-brown ink outlines, vibrant luminous cel-shaded watercolor coloring.
+Clean Output: Pure flat solid white background (#FFFFFF), no drop shadow on background, strictly NO grid lines, NO borders, NO text, NO numbers, NO watermarks.
 ```
 
 ## 3. Bộ Cuộn Sách & Báu Vật Nâng Cấp Vườn (`items_garden_upgrades.png`) — [P2]
-*Gồm 6 subimages (`3×2`): Bình tưới tre linh thủy (Tăng tốc hồi chiêu cây), Xẻng vàng tinh luyện (Tăng % hoàn Linh Hỏa), Đèn lồng Thần Tài (Tăng Linh Hỏa khởi đầu), Mèo thần tài Maneki-neko (Tăng thưởng vàng), Búa thợ rèn Edo (Nâng cấp Tượng Komainu), Hộp cơm Bento (Tăng máu tối đa toàn quân).*
 ```
-2D Japanese Edo-period chibi game permanent upgrade relics icon pack, 3 columns by 2 rows (6 equal-sized square cells), garden shop upgrade artifacts centered in each cell. Cell 1: cute bamboo watering can pouring sparkling magical aqua water (cooldown reduction upgrade). Cell 2: ornate golden-bladed garden trowel with wrapped red handle (shovel refund upgrade). Cell 3: plump glowing red-and-gold Edo festival lantern (starting Spirit Flame upgrade). Cell 4: cute waving white-and-gold lucky cat figurine (Maneki-neko reward boost). Cell 5: sturdy Japanese wooden-and-gold blessing mallet (Uchide no Kozuchi — Komainu upgrade). Cell 6: colorful tiered lacquered Edo Bento lunchbox filled with cute onigiri (max HP upgrade). Hand-drawn 2D game art style, thick clean dark-brown ink outlines, vibrant warm cel-shaded watercolor coloring. Pure flat solid white background (#FFFFFF), no grid lines, no borders, no text, no drop shadow on the background.
+Output file: inbox/items_garden_upgrades.png
+Asset: Bộ Cuộn Sách & Báu Vật Nâng Cấp Vườn (Permanent Garden Upgrade Relics) — 6 Icons
+Grid: 3 columns × 2 rows (6 equal-sized square cells, 3:2 aspect ratio)
+
+Prompt:
+Create a 2D Japanese Edo-period chibi game permanent upgrade relics icon pack arranged in a strict 3 columns by 2 rows grid (6 cleanly separated equal-sized square cells, read left-to-right, top-to-bottom).
+Subimages (6 garden shop upgrade artifacts centered in each cell):
+- Cell 1 (row 1, col 1): Cute green bamboo watering can pouring sparkling magical aqua water (cooldown reduction upgrade).
+- Cell 2 (row 1, col 2): Ornate golden-bladed garden trowel with wrapped crimson handle (shovel refund upgrade).
+- Cell 3 (row 1, col 3): Plump glowing red-and-gold Edo festival lantern (starting Spirit Flame boost).
+- Cell 4 (row 2, col 1): Cute waving white-and-gold lucky cat figurine (Maneki-neko reward multiplier).
+- Cell 5 (row 2, col 2): Sturdy Japanese wooden-and-gold blessing mallet (Uchide no Kozuchi — Komainu statue upgrade).
+- Cell 6 (row 2, col 3): Colorful tiered lacquered Edo Bento lunchbox filled with cute onigiri rice balls (team max HP boost).
+Composition & Technical Rules: Center-aligned in every cell with generous margins and bold silhouettes.
+Art Style: Hand-drawn 2D Edo chibi game art, thick clean dark-brown ink outlines, vibrant warm cel-shaded watercolor coloring.
+Clean Output: Pure flat solid white background (#FFFFFF), no drop shadow on background, strictly NO grid lines, NO borders, NO text, NO numbers, NO watermarks.
 ```
