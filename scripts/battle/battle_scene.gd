@@ -2,6 +2,16 @@ extends Node2D
 
 ## Main lane-based battle controller for Edo Garden Defense.
 
+const BATTLEFIELD_TILE_SHADER := preload("res://assets/shaders/battlefield_tiles.gdshader")
+const SCENERY := preload("res://scripts/battle/scenery.gd")
+const POND_BRIDGE_X := 88.0
+const FENCE_TILE_ORIGIN_X := -420.0
+const BACKDROP_OVERSCAN := 24.0
+const BATTLEFIELD_REFERENCE_SIZE := Vector2(1280.0, 720.0)
+const HUD_SIDE_MARGIN := 12.0
+const HUD_EDGE_MARGIN := 8.0
+const BOTTOM_HUD_SCALE := 1.35
+const SAFE_AREA := preload("res://scripts/ui/safe_area.gd")
 const MAIN_MENU_PATH := "res://scenes/main/MainMenu.tscn"
 const SEED_CARD_SCRIPT := preload("res://scripts/ui/seed_card.gd")
 const DEFENDER_SCRIPT := preload("res://scripts/entities/defender.gd")
@@ -13,6 +23,40 @@ const KOMAINU_SCRIPT := preload("res://scripts/entities/komainu_guardian.gd")
 const OBSTACLE_SCRIPT := preload("res://scripts/entities/obstacle.gd")
 
 const SPEED_STEPS: Array[float] = [1.0, 2.0, 5.0]
+const PREPARATION_MAX_SPEED := 2.0
+const FIRST_SKY_FLAME_DELAY := 4.0
+const OPENING_SPAWN_STAGGER := 3.0
+const COMBAT_WAVE_DELAY_MULTIPLIER := 1.35
+const VFX_POOL_LIMIT := 32
+# Scale, opacity and playback speed for cues that overlap the combat board.
+const COMBAT_VFX := {
+	"fx_armor_break": Vector3(0.78, 0.84, 1.15),
+	"fx_burn_flame": Vector3(0.86, 0.75, 1.0),
+	"fx_explosion": Vector3(0.82, 0.89, 1.15),
+	"fx_freeze_overlay": Vector3(0.72, 0.71, 1.20),
+	"fx_heal_aura": Vector3(0.82, 0.62, 1.25),
+	"fx_frost_chime_wave": Vector3(0.78, 0.60, 1.25),
+	"fx_poison_cloud": Vector3(0.73, 0.68, 1.25),
+	"fx_hit_spark": Vector3(0.85, 0.82, 1.25),
+	"fx_ice_hit_splash": Vector3(0.80, 0.75, 1.25),
+	"fx_miko_summon_circle": Vector3(0.90, 0.80, 1.0),
+	"fx_thunder_strike": Vector3(0.85, 0.78, 1.15),
+	"fx_yuki_ice_breath": Vector3(0.86, 0.74, 1.10),
+	"phao_hoa_explode": Vector3(0.76, 0.91, 1.15),
+}
+const GROUND_VFX_OFFSETS := {
+	"fx_burn_flame": 14.0,
+	"fx_explosion": 12.0,
+	"fx_freeze_overlay": 12.0,
+	"fx_frost_chime_wave": 20.0,
+	"fx_heal_aura": 24.0,
+	"fx_miko_summon_circle": 6.0,
+	"fx_poison_cloud": 12.0,
+	"fx_smoke_puff": 12.0,
+	"fx_thunder_strike": 2.0,
+	"phao_hoa_explode": 12.0,
+}
+
 
 var level_id: int = 1
 var level_cfg: Dictionary = {}
@@ -34,21 +78,28 @@ var _water_lily_overlays: Array = [] # [row][col] -> Sprite2D or null
 
 var _world_root: Node2D
 var _camera: Camera2D
+var _fit_world_backdrop: Callable
 var _grid_layer: Node2D
 var _defender_layer: Node2D
 var _enemy_layer: Node2D
 var _projectile_layer: Node2D
 var _vfx_layer: Node2D
+var _idle_vfx: Array[VfxEffect] = []
+var _vfx_textures: Dictionary[String, Texture2D] = {}
 var _flame_layer: Node2D
 var _ambient_layer: Node2D
 var _ghost_sprite: Sprite2D
 var _cell_highlight: ColorRect
+var _occupied_hint: Label
 var _plant_ring: Sprite2D
 
 var _hud_layer: CanvasLayer
 var _hud_root: Control
+var _top_hud_row: HBoxContainer
+var _bottom_hud: PanelContainer
+var _flame_counter: Control
 var _flame_label: Label
-var _flame_pill_pos: Vector2 = Vector2(96.0, 48.0)
+var _flame_hud_icon: TextureRect
 var _seed_cards: Array = []
 var _wave_label: Label
 var _wave_fill_clip: Control
@@ -63,7 +114,7 @@ var _skill_cooldowns: Dictionary = {}
 
 var _banner_container: Control
 var _banner_label: Label
-var _modal_overlay: ColorRect
+var _modal_overlay: Control
 var _modal_scroll: TextureRect
 var _modal_banner: TextureRect
 var _modal_portrait: TextureRect
@@ -85,12 +136,12 @@ var _natural_flame_timer: float = 0.0
 var _shake_amp: float = 0.0
 var _shake_timer: float = 0.0
 var _ambient_particles: Array[Dictionary] = []
-var _koi_water_tiles: Array[Dictionary] = []
+var _water_material: ShaderMaterial
+var _pond_koi: Array[Sprite2D] = []
 var _atmo_nodes: Array[Dictionary] = []
 var _flora_nodes: Array[Dictionary] = []
 var _glow_nodes: Array[Dictionary] = []
 var _bg_time: float = 0.0
-var _pointer_down_on_field: bool = false
 var _auto_ai_timer: float = 0.0
 var _auto_highlight_timer: float = 0.0
 
@@ -100,15 +151,15 @@ func _ready() -> void:
 	level_id = GameData.selected_level
 	level_cfg = GameData.get_level_config(level_id)
 	spirit_flame = int(level_cfg.get("starting_flame", 150)) + GameData.get_starting_flame_bonus()
+	_natural_flame_timer = maxf(0.0, _natural_flame_interval() - FIRST_SKY_FLAME_DELAY)
 
 	_init_data_structures()
 	_build_world()
 	_build_hud()
 	_build_modals()
-	AudioManager.start_bgm()
+	AudioManager.start_bgm(level_id)
 	set_game_speed(5.0 if GameData.auto_play_active else GameData.game_speed_multiplier)
 	_refresh_auto_btn()
-	_update_wave_hud()
 	_update_flame_hud()
 	if GameData.auto_play_active:
 		_setup_auto_play_showcase_formation()
@@ -140,9 +191,179 @@ func _init_data_structures() -> void:
 		_komainu_by_lane.append(null)
 
 
+func _fit_sky_to_viewport(sky: Sprite2D) -> void:
+	if not is_instance_valid(sky):
+		return
+	var texture_size := sky.texture.get_size()
+	var viewport_size := get_viewport_rect().size / _camera.zoom
+	var camera_center := _camera.position
+	var sky_bottom := 96.0 + texture_size.y * 0.28
+	var sky_top := minf(96.0 - texture_size.y * 0.28, camera_center.y - viewport_size.y * 0.5 - 12.0)
+	sky.position = Vector2(camera_center.x, (sky_top + sky_bottom) * 0.5)
+	sky.scale = Vector2(maxf(2.05, (viewport_size.x + 24.0) / texture_size.x), (sky_bottom - sky_top) / texture_size.y)
+
+
+func _build_terrain(water_lane: int) -> ColorRect:
+	var terrain := ColorRect.new()
+	terrain.position.y = GameData.GRID_ORIGIN.y
+	terrain.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	terrain.z_index = 2
+	var material := ShaderMaterial.new()
+	material.shader = BATTLEFIELD_TILE_SHADER
+	var variants: Vector2i = level_cfg["terrain_variants"]
+	material.set_shader_parameter("ground_texture", load("res://assets/sprites/tiles/%s_%d.png" % [level_cfg["tile_primary"], variants.x]))
+	material.set_shader_parameter("accent_texture", load("res://assets/sprites/tiles/%s_%d.png" % [level_cfg["tile_alt"], variants.y]))
+	material.set_shader_parameter("saturation_contrast", level_cfg["land_tone"])
+	material.set_shader_parameter("ground_tint", level_cfg["terrain_tint"])
+	material.set_shader_parameter("grid_origin", GameData.GRID_ORIGIN)
+	material.set_shader_parameter("cell_size", GameData.CELL_SIZE)
+	material.set_shader_parameter("grid_size", Vector2(GameData.GRID_COLS, GameData.GRID_ROWS))
+	material.set_shader_parameter("stage_size", BATTLEFIELD_REFERENCE_SIZE)
+	material.set_shader_parameter("water_lane", water_lane)
+	if water_lane >= 0:
+		material.set_shader_parameter("water_texture", preload("res://assets/sprites/tiles/tile_koi_water_1.png"))
+		material.set_shader_parameter("pond_bridge_x", POND_BRIDGE_X)
+		_water_material = material
+	terrain.material = material
+	_world_root.add_child(terrain)
+	return terrain
+
+
+func _build_pond_koi(water_lane: int) -> void:
+	var material := ShaderMaterial.new()
+	material.shader = preload("res://assets/shaders/pond_koi.gdshader")
+	var atlas := preload("res://assets/sprites/tiles/env_koi_water_anim.png")
+	var lane_y := GameData.cell_to_world(water_lane, 0).y
+	for x in [457.0, 786.0, 1042.0]:
+		var koi := Sprite2D.new()
+		koi.texture = atlas
+		koi.hframes = 4
+		koi.vframes = 3
+		koi.position = Vector2(x, lane_y)
+		koi.scale = Vector2.ONE * 0.68
+		koi.material = material
+		koi.modulate = Color(0.77, 0.87, 0.92, 0.76)
+		koi.z_index = 4
+		_world_root.add_child(koi)
+		_pond_koi.append(koi)
+
+
+func _build_side_gardens(water_lane: int, atmo_style: String, yard_tint: Color) -> void:
+	var scenery := SCENERY.new()
+	var stone_path: String = level_cfg.get("stone_path_tex", "res://assets/sprites/environments/env_path_stepping_stones.png")
+	var pond := water_lane >= 0
+	var stone_tint := Color(0.76, 0.78, 0.83) if pond else yard_tint
+	var stone_spots := [
+		Vector3(54, 312, 74),
+		Vector3(107, 579, 61),
+		Vector3(1207, 302, 63),
+		Vector3(1241, 566, 76),
+	]
+	for index in range(stone_spots.size()):
+		var spot: Vector3 = stone_spots[index]
+		scenery.place(_world_root, stone_path, Vector2(spot.x, spot.y), spot.z, 7, stone_tint, deg_to_rad(7.0 - 4.0 * index))
+
+	_flora_nodes.clear()
+	var flora_paths: Array = level_cfg["biome_flora"]
+	var flora_spots := [
+		Vector2(80, 258),
+		Vector2(1220, 255),
+		Vector2(1210, 629),
+	]
+	var flora_widths: Vector3 = level_cfg.get("biome_flora_widths", Vector3(90, 91, 80))
+	for index in range(flora_paths.size()):
+		var path: String = flora_paths[index]
+		if pond and path.ends_with("/prop_red_bridge.png"):
+			var bridge_foot := Vector2(POND_BRIDGE_X, GameData.cell_to_world(water_lane, 0).y - 32.0)
+			scenery.place(_world_root, path, bridge_foot, 103, 10)
+			continue
+		var prop := scenery.place(_world_root, path, flora_spots[index], flora_widths[index], 11)
+		_flora_nodes.append({"node": prop, "phase": float(index) * 1.7})
+
+	var house_foot := Vector2(80, 529 if pond else 466)
+	var gate_foot := Vector2(1218, 488 if pond else 470)
+	scenery.place(_world_root, level_cfg["house_tex"], house_foot, 145.0, 12)
+	scenery.place(_world_root, level_cfg["gate_tex"], gate_foot, 100.0, 12)
+
+	_glow_nodes.clear()
+	if atmo_style != "day":
+		var glow_tex := preload("res://assets/sprites/environments/env_atmo_lantern_glow.png")
+		for anchor in [house_foot + Vector2(9, -35), gate_foot + Vector2(-23, -49), gate_foot + Vector2(23, -49)]:
+			var glow := Sprite2D.new()
+			glow.texture = glow_tex
+			glow.position = anchor
+			glow.scale = Vector2.ONE * 0.33
+			glow.modulate = Color(1.0, 0.90, 0.70, 0.27)
+			glow.z_index = 13
+			_world_root.add_child(glow)
+			_glow_nodes.append({"node": glow, "phase": anchor.x * 0.01})
+
+
+func _build_backdrop(water_lane: int) -> void:
+	var sky_rect := ColorRect.new()
+	sky_rect.color = level_cfg["sky_top"]
+	sky_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_world_root.add_child(sky_rect)
+
+	var horizon := ColorRect.new()
+	horizon.color = level_cfg["sky_bottom"]
+	horizon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_world_root.add_child(horizon)
+
+	var sky := Sprite2D.new()
+	sky.texture = load("res://assets/sprites/backgrounds/%s_0.png" % level_cfg["bg_stem"]) as Texture2D
+	sky.z_index = 1
+	_world_root.add_child(sky)
+	var terrain := _build_terrain(water_lane)
+	var fence_layer := Node2D.new()
+	fence_layer.z_index = 3
+	_world_root.add_child(fence_layer)
+	var fence := load(level_cfg["top_border"]) as Texture2D
+	_fit_world_backdrop = _fit_backdrop.bind(sky_rect, horizon, sky, terrain, fence_layer, fence)
+
+
+func _fit_backdrop(sky_rect: ColorRect, horizon: ColorRect, sky: Sprite2D, terrain: ColorRect, fence_layer: Node2D, fence: Texture2D) -> void:
+	var view := get_viewport_rect().size / _camera.zoom + Vector2.ONE * (BACKDROP_OVERSCAN * 2.0)
+	var bounds := Rect2(_camera.position - view * 0.5, view)
+	var ground_top := GameData.GRID_ORIGIN.y
+	sky_rect.position = bounds.position
+	sky_rect.size = Vector2(view.x, maxf(0.0, ground_top - bounds.position.y))
+	horizon.position = Vector2(bounds.position.x, 80.0)
+	horizon.size = Vector2(view.x, ground_top - horizon.position.y + 2.0)
+	terrain.position.x = bounds.position.x
+	terrain.size = Vector2(view.x, maxf(1.0, bounds.end.y - ground_top))
+	if sky.texture:
+		_fit_sky_to_viewport(sky)
+	if fence:
+		_fit_horizon_border(fence_layer, fence, bounds)
+
+
+func _fit_horizon_border(layer: Node2D, texture: Texture2D, bounds: Rect2) -> void:
+	var height := 94.0
+	var scale_to_height := height / float(texture.get_height())
+	var visible_width := float(texture.get_width()) * scale_to_height
+	var step := maxf(64.0, visible_width - 4.0)
+	var first := floori((bounds.position.x - FENCE_TILE_ORIGIN_X) / step)
+	var count := ceili((bounds.end.x - FENCE_TILE_ORIGIN_X) / step) - first
+	for index in range(count):
+		var tile: Sprite2D
+		if index < layer.get_child_count():
+			tile = layer.get_child(index) as Sprite2D
+		else:
+			tile = Sprite2D.new()
+			tile.texture = texture
+			tile.scale = Vector2.ONE * scale_to_height
+			layer.add_child(tile)
+		var center_x := FENCE_TILE_ORIGIN_X + (first + index) * step + visible_width * 0.5
+		tile.position = Vector2(center_x, 182.0 - height * 0.5)
+		tile.show()
+	for index in range(count, layer.get_child_count()):
+		layer.get_child(index).hide()
+
+
 func _build_world() -> void:
 	_camera = Camera2D.new()
-	_camera.position = Vector2(640.0, 360.0)
+	_camera.position = BATTLEFIELD_REFERENCE_SIZE * 0.5
 	_camera.enabled = true
 	add_child(_camera)
 
@@ -150,105 +371,14 @@ func _build_world() -> void:
 	_world_root.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(_world_root)
 
-	# Sky & Chapter Terrain Backdrop (extra wide for 20:9 & 4:3 aspect expand)
-	var sky_rect := ColorRect.new()
-	sky_rect.position = Vector2(-420, -220)
-	sky_rect.size = Vector2(2120, 400)
-	sky_rect.color = level_cfg["sky_top"]
-	_world_root.add_child(sky_rect)
-
-	var horizon_rect := ColorRect.new()
-	horizon_rect.position = Vector2(-420, 80)
-	horizon_rect.size = Vector2(2120, 110)
-	horizon_rect.color = level_cfg["sky_bottom"]
-	_world_root.add_child(horizon_rect)
-
-	var ground_rect := ColorRect.new()
-	ground_rect.position = Vector2(-420, 170)
-	ground_rect.size = Vector2(2120, 860)
-	ground_rect.color = level_cfg["ground_tint"]
-	_world_root.add_child(ground_rect)
-
-	# Full chapter sky artwork (Panel _0 across top vista, zero mirror seam)
-	if level_cfg.has("bg_stem"):
-		var sky_tex := load("res://assets/sprites/backgrounds/%s_0.png" % level_cfg["bg_stem"]) as Texture2D
-		if sky_tex:
-			var sky_sp := Sprite2D.new()
-			sky_sp.texture = sky_tex
-			sky_sp.position = Vector2(640.0, 96.0)
-			sky_sp.scale = Vector2(2.05, 0.56)
-			sky_sp.z_index = 1
-			_world_root.add_child(sky_sp)
-
-	# Seamless horizontally-tiled mid-ground horizon border above Row 0 (zero flip_h seams)
-	var border_path := str(level_cfg.get("top_border", ""))
-	if border_path != "" and ResourceLoader.exists(border_path):
-		var border_tex := load(border_path) as Texture2D
-		if border_tex:
-			var b_scale := 94.0 / maxf(1.0, float(border_tex.get_height()))
-			var b_step := maxf(64.0, float(border_tex.get_width()) * b_scale - 4.0)
-			var bx := -120.0 + float(border_tex.get_width()) * b_scale * 0.5
-			while bx < 1620.0:
-				var b_sp := Sprite2D.new()
-				b_sp.texture = border_tex
-				b_sp.position = Vector2(bx, 182.0 - 94.0 * 0.5)
-				b_sp.scale = Vector2(b_scale, b_scale)
-				b_sp.z_index = 3
-				_world_root.add_child(b_sp)
-				bx += b_step
-
-	# Textured Outer Yard & Bottom Margin Ground Tiles (eliminates flat ColorRect borders)
-	var yard_layer := Node2D.new()
-	yard_layer.z_index = 4
-	_world_root.add_child(yard_layer)
-
-	var p_name: String = level_cfg["tile_primary"]
-	var a_name: String = level_cfg["tile_alt"]
 	var water_lane: int = int(level_cfg.get("water_lane", -1))
-	var koi_anim_tex := load("res://assets/sprites/tiles/env_koi_water_anim.png") as Texture2D
 	var atmo_style := str(level_cfg.get("atmosphere_style", "day"))
 	var yard_tint := Color(0.84, 0.84, 0.90, 1.0)
 	if atmo_style in ["night", "mist"]:
 		yard_tint = Color(0.74, 0.76, 0.86, 1.0)
+	_build_backdrop(water_lane)
 
-	_koi_water_tiles.clear()
-	for r in range(-1, GameData.GRID_ROWS + 2):
-		for c in range(-3, GameData.GRID_COLS + 4):
-			if r >= 0 and r < GameData.GRID_ROWS and c >= 0 and c < GameData.GRID_COLS:
-				continue
-			if r == -1:
-				continue
-			var tsp := Sprite2D.new()
-			if r == water_lane and koi_anim_tex:
-				tsp.texture = koi_anim_tex
-				tsp.hframes = 4
-				tsp.vframes = 3
-				var start_f := (c * 3 + 12) % 12
-				tsp.frame = start_f
-				_koi_water_tiles.append({"node": tsp, "phase": float(start_f)})
-			else:
-				var v := ((absi(r) * 5 + absi(c) * 3) % 4)
-				var stem := a_name if ((r + c) % 2 == 0) else p_name
-				tsp.texture = load("res://assets/sprites/tiles/%s_%d.png" % [stem, v]) as Texture2D
-			tsp.position = GameData.cell_to_world(r, c)
-			tsp.scale = Vector2(GameData.CELL_SIZE.x / 128.0, GameData.CELL_SIZE.y / 128.0)
-			tsp.modulate = yard_tint
-			yard_layer.add_child(tsp)
-
-	# Stepping stones along left sanctuary & right entrance paths
-	var stone_path_tex := load("res://assets/sprites/environments/env_path_stepping_stones.png") as Texture2D
-	if stone_path_tex:
-		for sy in [250.0, 355.0, 485.0, 585.0]:
-			if water_lane >= 0 and absf(sy - GameData.cell_to_world(water_lane, 0).y) < 55.0:
-				continue
-			for sx in [148.0, 1142.0]:
-				var st_sp := Sprite2D.new()
-				st_sp.texture = stone_path_tex
-				st_sp.position = Vector2(sx, sy)
-				st_sp.scale = Vector2(0.42, 0.42)
-				st_sp.modulate = yard_tint
-				st_sp.z_index = 6
-				_world_root.add_child(st_sp)
+	_build_side_gardens(water_lane, atmo_style, yard_tint)
 
 	# Bottom lawn edge transition strip along Row 4 bottom
 	var edge_path := str(level_cfg.get("lawn_edge", ""))
@@ -263,114 +393,29 @@ func _build_world() -> void:
 				esp.texture = edge_tex
 				esp.position = Vector2(ex, 636.0)
 				esp.scale = Vector2(e_sc, e_sc)
+				if atmo_style == "night":
+					esp.modulate = Color(0.63, 0.74, 0.72)
 				esp.z_index = 8
 				_world_root.add_child(esp)
 				ex += e_step
 
-	# Seasonal Biome Flora placed neatly outside grid & HUD skill zone
-	_flora_nodes.clear()
-	var flora_paths: Array = level_cfg.get("biome_flora", [])
-	var flora_spots := [
-		{"pos": Vector2(106.0, 224.0), "scale": 0.46},
-		{"pos": Vector2(1182.0, 224.0), "scale": 0.46},
-		{"pos": Vector2(1182.0, 616.0), "scale": 0.46},
-	]
-	for i in range(mini(flora_paths.size(), flora_spots.size())):
-		var fp: String = flora_paths[i]
-		if ResourceLoader.exists(fp):
-			var spot: Dictionary = flora_spots[i]
-			var fl_sp := Sprite2D.new()
-			fl_sp.texture = load(fp) as Texture2D
-			fl_sp.position = spot["pos"]
-			fl_sp.scale = Vector2(float(spot["scale"]), float(spot["scale"]))
-			fl_sp.z_index = 11
-			_world_root.add_child(fl_sp)
-			_flora_nodes.append({"node": fl_sp, "phase": float(i) * 1.7, "base_scale": float(spot["scale"])})
-
-	# 5x9 Grid Tiles
+	# The gameplay grid owns placement overlays. Its ground is painted below it.
 	_grid_layer = Node2D.new()
 	_grid_layer.z_index = 5
 	_world_root.add_child(_grid_layer)
-
-	var lily_tex := load("res://assets/sprites/tiles/water_lily_pad.png") as Texture2D
-	var lotus_tex := load("res://assets/sprites/tiles/water_lily_lotus.png") as Texture2D
-	for r in range(GameData.GRID_ROWS):
-		for c in range(GameData.GRID_COLS):
-			var tile_sp := Sprite2D.new()
-			if r == water_lane and koi_anim_tex:
-				tile_sp.texture = koi_anim_tex
-				tile_sp.hframes = 4
-				tile_sp.vframes = 3
-				var start_f := (c * 2) % 12
-				tile_sp.frame = start_f
-				_koi_water_tiles.append({"node": tile_sp, "phase": float(start_f)})
-			else:
-				var tex_path := ""
-				if r == water_lane:
-					var water_pattern := [0, 2, 3, 4, 5, 1, 3, 2, 0]
-					tex_path = "res://assets/sprites/tiles/tile_koi_water_%d.png" % water_pattern[c]
-				else:
-					var use_primary := ((r + c) % 2) == 0
-					var stem := p_name if use_primary else a_name
-					var variant := 0 if use_primary else 1
-					if ((r * 7 + c * 3) % 5) == 0:
-						variant = 2 + ((r + c) % 4)
-					tex_path = "res://assets/sprites/tiles/%s_%d.png" % [stem, variant]
-				tile_sp.texture = load(tex_path) as Texture2D
-			tile_sp.position = GameData.cell_to_world(r, c)
-			tile_sp.scale = Vector2(GameData.CELL_SIZE.x / 128.0, GameData.CELL_SIZE.y / 128.0)
-			_grid_layer.add_child(tile_sp)
-
-			# Subtle grid checkerboard readability tint
-			if r != water_lane and ((r + c) % 2) == 1:
-				var tint := ColorRect.new()
-				tint.position = GameData.GRID_ORIGIN + Vector2(c * GameData.CELL_SIZE.x, r * GameData.CELL_SIZE.y)
-				tint.size = GameData.CELL_SIZE
-				tint.color = Color(0.0, 0.0, 0.0, 0.065)
-				tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-				_grid_layer.add_child(tint)
-
-			if r == water_lane:
-				var lily := Sprite2D.new()
-				lily.texture = lotus_tex if (c % 2 == 1 and lotus_tex != null) else lily_tex
-				lily.position = GameData.cell_to_world(r, c)
-				lily.scale = Vector2(0.76, 0.76)
-				lily.visible = false
-				lily.z_index = 6
-				_grid_layer.add_child(lily)
-				_water_lily_overlays[r][c] = lily
-
-	# Chapter-Themed Guardian House & Yokai Spawn Gate
-	var house_tex_path := str(level_cfg.get("house_tex", "res://assets/sprites/props/prop_edo_house.png"))
-	var edo_house := Sprite2D.new()
-	edo_house.texture = load(house_tex_path) as Texture2D
-	edo_house.position = Vector2(76.0, 410.0)
-	edo_house.scale = Vector2(0.72, 0.72)
-	edo_house.z_index = 12
-	_world_root.add_child(edo_house)
-
-	var gate_tex_path := str(level_cfg.get("gate_tex", "res://assets/sprites/props/prop_torii.png"))
-	var torii := Sprite2D.new()
-	torii.texture = load(gate_tex_path) as Texture2D
-	torii.position = Vector2(1188.0, 410.0)
-	torii.scale = Vector2(0.84, 0.84)
-	torii.z_index = 12
-	_world_root.add_child(torii)
-
-	# Lantern radial glow highlights near home sanctuary & spawn gate for warm contrast
-	_glow_nodes.clear()
-	if atmo_style != "day":
-		var glow_tex := load("res://assets/sprites/environments/env_atmo_lantern_glow.png") as Texture2D
-		if glow_tex:
-			for gp in [Vector2(104.0, 424.0), Vector2(1152.0, 392.0), Vector2(1222.0, 392.0)]:
-				var gl := Sprite2D.new()
-				gl.texture = glow_tex
-				gl.position = gp
-				gl.scale = Vector2(0.38, 0.38)
-				gl.modulate = Color(1.0, 0.90, 0.70, 0.42)
-				gl.z_index = 13
-				_world_root.add_child(gl)
-				_glow_nodes.append({"node": gl, "phase": gp.x * 0.01})
+	if water_lane >= 0:
+		_build_pond_koi(water_lane)
+		var lily_tex := preload("res://assets/sprites/tiles/water_lily_pad.png")
+		var lotus_tex := preload("res://assets/sprites/tiles/water_lily_lotus.png")
+		for col in range(GameData.GRID_COLS):
+			var lily := Sprite2D.new()
+			lily.texture = lotus_tex if col % 2 == 1 else lily_tex
+			lily.position = GameData.cell_to_world(water_lane, col)
+			lily.scale = Vector2(0.76, 0.76)
+			lily.hide()
+			lily.z_index = 6
+			_grid_layer.add_child(lily)
+			_water_lily_overlays[water_lane][col] = lily
 
 	# Cell highlight, Placement reticle ring & Ghost preview
 	_cell_highlight = ColorRect.new()
@@ -380,6 +425,20 @@ func _build_world() -> void:
 	_cell_highlight.z_index = 15
 	_cell_highlight.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_world_root.add_child(_cell_highlight)
+
+	_occupied_hint = Label.new()
+	_occupied_hint.text = "Đã chiếm"
+	_occupied_hint.position = Vector2(0.0, GameData.CELL_SIZE.y - 24.0)
+	_occupied_hint.size.x = GameData.CELL_SIZE.x
+	_occupied_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_occupied_hint.add_theme_font_size_override("font_size", 14)
+	_occupied_hint.add_theme_color_override("font_outline_color", Color(0.13, 0.07, 0.04))
+	_occupied_hint.add_theme_constant_override("outline_size", 6)
+	_occupied_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_occupied_hint.z_as_relative = false
+	_occupied_hint.z_index = 81
+	_occupied_hint.hide()
+	_cell_highlight.add_child(_occupied_hint)
 
 	_plant_ring = Sprite2D.new()
 	_plant_ring.texture = load("res://assets/sprites/ui/badge_plant_ring.png") as Texture2D
@@ -403,7 +462,7 @@ func _build_world() -> void:
 	_vfx_layer = Node2D.new()
 	_flame_layer = Node2D.new()
 	_ambient_layer = Node2D.new()
-	_ambient_layer.z_index = 85
+	_ambient_layer.z_index = 17
 	_world_root.add_child(_defender_layer)
 	_world_root.add_child(_enemy_layer)
 	_world_root.add_child(_projectile_layer)
@@ -414,7 +473,14 @@ func _build_world() -> void:
 	# Spawn 5 Komainu Guardians (Last Line of Defense)
 	for r in range(GameData.GRID_ROWS):
 		var k: KomainuGuardian = KOMAINU_SCRIPT.new()
-		var pos := Vector2(188.0, GameData.GRID_ORIGIN.y + (r + 0.5) * GameData.CELL_SIZE.y)
+		var pos := Vector2(188.0, GameData.cell_to_world(r, 0).y)
+		if r == water_lane:
+			var footing := Sprite2D.new()
+			footing.texture = preload("res://assets/sprites/tiles/water_stepping_stone.png")
+			footing.position = pos + Vector2(0, 14)
+			footing.scale = Vector2.ONE * 0.64
+			footing.z_index = 11
+			_world_root.add_child(footing)
 		k.setup(self, r, pos)
 		_world_root.add_child(k)
 		_komainu_by_lane[r] = k
@@ -428,15 +494,16 @@ func _build_world() -> void:
 	_atmo_nodes.clear()
 	_build_atmosphere_effects(atmo_style)
 
-	# Ambient particles matching chapter biome (26 particles for lively depth)
+	# Keep ambient wisps distinct from collectible Spirit Flames at night.
 	var p_tex := load(level_cfg["ambient_particle"]) as Texture2D
-	for i in range(26):
+	var night := atmo_style == "night"
+	for i in range(12 if night else 26):
 		var sp := Sprite2D.new()
 		sp.texture = p_tex
-		var sc := randf_range(0.22, 0.48)
+		var sc := randf_range(0.10, 0.20) if night else randf_range(0.18, 0.37)
 		sp.scale = Vector2(sc, sc)
 		sp.position = Vector2(randf_range(0.0, 1280.0), randf_range(70.0, 700.0))
-		sp.modulate.a = randf_range(0.45, 0.78)
+		sp.modulate.a = randf_range(0.14, 0.26) if night else randf_range(0.27, 0.48)
 		_ambient_layer.add_child(sp)
 		_ambient_particles.append({
 			"node": sp,
@@ -494,15 +561,15 @@ func _build_atmosphere_effects(style: String) -> void:
 					_atmo_nodes.append({"node": bs, "kind": "pulse", "vx": 0.0, "vy": 0.0, "base_a": 0.38, "phase": float(i) * 1.5})
 		"night":
 			var ff_tex := load("res://assets/sprites/environments/env_atmo_fireflies.png") as Texture2D
-			for i in range(3):
+			for i in range(2):
 				if ff_tex:
 					var fs := Sprite2D.new()
 					fs.texture = ff_tex
-					fs.position = Vector2(210.0 + i * 430.0, 260.0 + (i % 2) * 220.0)
-					fs.scale = Vector2(0.70, 0.70)
-					fs.modulate.a = 0.78
+					fs.position = Vector2(106.0 + i * 1090.0, 289.0 + i * 230.0)
+					fs.scale = Vector2(0.52, 0.52)
+					fs.modulate.a = 0.44
 					_ambient_layer.add_child(fs)
-					_atmo_nodes.append({"node": fs, "kind": "bob", "vx": 0.0, "vy": 0.0, "base_y": fs.position.y, "base_a": 0.78, "phase": float(i) * 1.9})
+					_atmo_nodes.append({"node": fs, "kind": "bob", "vx": 0.0, "vy": 0.0, "base_y": fs.position.y, "base_a": 0.44, "phase": float(i) * 1.9})
 		"mist":
 			var mist_tex := load("res://assets/sprites/environments/env_atmo_mist.png") as Texture2D
 			var ff_tex := load("res://assets/sprites/environments/env_atmo_fireflies.png") as Texture2D
@@ -512,17 +579,18 @@ func _build_atmosphere_effects(style: String) -> void:
 					ms.texture = mist_tex
 					ms.position = Vector2(120.0 + i * 360.0, 195.0 + (i % 2) * 320.0)
 					ms.scale = Vector2(1.25, 1.0)
-					ms.modulate.a = 0.50
+					ms.modulate.a = 0.30
 					_ambient_layer.add_child(ms)
 					_atmo_nodes.append({"node": ms, "kind": "drift", "vx": -16.0 - float(i) * 2.0, "vy": 0.0, "base_a": 0.50, "phase": float(i)})
 			for i in range(2):
 				if ff_tex:
 					var fs := Sprite2D.new()
 					fs.texture = ff_tex
-					fs.position = Vector2(160.0 + i * 960.0, 320.0)
-					fs.scale = Vector2(0.64, 0.64)
+					fs.position = Vector2(62.0 + i * 1140.0, 360.0)
+					fs.scale = Vector2(0.46, 0.46)
+					fs.modulate.a = 0.34
 					_ambient_layer.add_child(fs)
-					_atmo_nodes.append({"node": fs, "kind": "bob", "vx": 0.0, "vy": 0.0, "base_y": 320.0, "base_a": 0.65, "phase": float(i) * 2.3})
+					_atmo_nodes.append({"node": fs, "kind": "bob", "vx": 0.0, "vy": 0.0, "base_y": fs.position.y, "base_a": 0.34, "phase": float(i) * 2.3})
 		"snow":
 			var wind_tex := load("res://assets/sprites/environments/env_atmo_snow_wind.png") as Texture2D
 			for i in range(3):
@@ -531,7 +599,7 @@ func _build_atmosphere_effects(style: String) -> void:
 					ws.texture = wind_tex
 					ws.position = Vector2(220.0 + i * 440.0, 220.0 + i * 165.0)
 					ws.scale = Vector2(1.05, 0.90)
-					ws.modulate.a = 0.45
+					ws.modulate.a = 0.28
 					_ambient_layer.add_child(ws)
 					_atmo_nodes.append({"node": ws, "kind": "drift", "vx": -62.0 - float(i) * 10.0, "vy": 8.0, "base_a": 0.45, "phase": float(i)})
 
@@ -546,88 +614,11 @@ func _build_hud() -> void:
 	_hud_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hud_layer.add_child(_hud_root)
 
-	# Soft wood-tinted top HUD backdrop letting the sky artwork show through
-	var top_bar_bg := ColorRect.new()
-	top_bar_bg.anchor_right = 1.0
-	top_bar_bg.offset_bottom = 104.0
-	top_bar_bg.color = Color(0.14, 0.08, 0.04, 0.42)
-	top_bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud_root.add_child(top_bar_bg)
-
-	var top_row := HBoxContainer.new()
-	top_row.anchor_left = 0.5
-	top_row.anchor_right = 0.5
-	top_row.offset_left = -638.0
-	top_row.offset_right = 638.0
-	top_row.offset_top = 6.0
-	top_row.offset_bottom = 102.0
-	top_row.add_theme_constant_override("separation", 4)
-	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud_root.add_child(top_row)
-
-	# 1. Spirit Flame Pill Counter
-	var pill_wrap := Control.new()
-	pill_wrap.custom_minimum_size = Vector2(150.0, 68.0)
-	pill_wrap.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	pill_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	top_row.add_child(pill_wrap)
-
-	var pill_bg := TextureRect.new()
-	pill_bg.texture = load("res://assets/sprites/ui/ui_resource_pill.png") as Texture2D
-	pill_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	pill_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	pill_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	pill_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pill_wrap.add_child(pill_bg)
-
-	var flame_icon := TextureRect.new()
-	flame_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	flame_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	flame_icon.custom_minimum_size = Vector2(34.0, 34.0)
-	flame_icon.texture = load("res://assets/sprites/ui/ui_spirit_flame.png") as Texture2D
-	flame_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pill_wrap.add_child(flame_icon)
-	flame_icon.position = Vector2(14.0, 16.0)
-	flame_icon.size = Vector2(34.0, 34.0)
-
-	_flame_label = Label.new()
-	_flame_label.text = str(spirit_flame)
-	_flame_label.position = Vector2(52.0, 16.0)
-	_flame_label.size = Vector2(84.0, 38.0)
-	_flame_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_flame_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_flame_label.add_theme_font_size_override("font_size", 24)
-	_flame_label.add_theme_color_override("font_color", Color(0.22, 0.11, 0.04))
-	_flame_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pill_wrap.add_child(_flame_label)
-	# Wait one frame for layout or compute pill center cleanly
-	var hud_center_x := get_viewport_rect().size.x * 0.5
-	_flame_pill_pos = Vector2(hud_center_x - 636.0 + 32.0, 44.0)
-
-	# 2. Seed Card Deck Row (up to 8 cards)
-	var deck_box := HBoxContainer.new()
-	deck_box.add_theme_constant_override("separation", 4)
-	deck_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	deck_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	deck_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	top_row.add_child(deck_box)
-
-	_seed_cards.clear()
-	for i in range(GameData.selected_deck.size()):
-		var did: String = GameData.selected_deck[i]
-		var card: SeedCard = SEED_CARD_SCRIPT.new()
-		card.setup(did, i)
-		card.card_pressed.connect(_on_card_pressed)
-		card.card_drag_started.connect(_on_card_drag_started)
-		deck_box.add_child(card)
-		_seed_cards.append(card)
-
-	# 3. Right HUD Controls (Wave Progress + Auto + Shovel + Speed + Sound + Pause)
 	var right_box := HBoxContainer.new()
-	right_box.add_theme_constant_override("separation", 4)
-	right_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_top_hud_row = right_box
+	right_box.add_theme_constant_override("separation", 6)
 	right_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	top_row.add_child(right_box)
+	_hud_root.add_child(right_box)
 
 	# Wave Bar
 	var wave_wrap := VBoxContainer.new()
@@ -642,6 +633,8 @@ func _build_hud() -> void:
 	_wave_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_wave_label.add_theme_font_size_override("font_size", 14)
 	_wave_label.add_theme_color_override("font_color", Color(0.98, 0.93, 0.80))
+	_wave_label.add_theme_color_override("font_outline_color", Color(0.12, 0.08, 0.06, 0.94))
+	_wave_label.add_theme_constant_override("outline_size", 4)
 	wave_wrap.add_child(_wave_label)
 
 	var bar_holder := Control.new()
@@ -769,20 +762,149 @@ func _build_hud() -> void:
 	_banner_label.add_theme_color_override("font_color", Color(1.0, 0.94, 0.72))
 	banner_h.add_child(_banner_label)
 
-	_build_skills_bar()
+	_build_bottom_hud()
+	get_viewport().size_changed.connect(_update_hud_safe_area)
+	get_window().focus_entered.connect(_update_hud_safe_area)
+	_update_hud_safe_area()
 
 
-func _build_skills_bar() -> void:
+func _update_hud_safe_area() -> void:
+	_apply_hud_safe_area(SAFE_AREA.viewport_insets(get_window()))
+
+
+func _apply_hud_safe_area(insets: Vector4) -> void:
+	_hud_root.offset_left = insets.x
+	_hud_root.offset_top = insets.y
+	_hud_root.offset_right = -insets.z
+	_hud_root.offset_bottom = -insets.w
+
+	var view_size := get_viewport_rect().size
+	var safe_size := view_size - Vector2(insets.x + insets.z, insets.y + insets.w)
+	var available_width := maxf(1.0, safe_size.x - HUD_SIDE_MARGIN * 2.0)
+	_bottom_hud.size = _bottom_hud.get_combined_minimum_size()
+	var bottom_scale := minf(BOTTOM_HUD_SCALE, available_width / _bottom_hud.size.x)
+	_bottom_hud.scale = Vector2.ONE * bottom_scale
+	var bottom_size := _bottom_hud.size * bottom_scale
+	_bottom_hud.position = Vector2((safe_size.x - bottom_size.x) * 0.5, safe_size.y - bottom_size.y - HUD_EDGE_MARGIN)
+
+	_top_hud_row.size = _top_hud_row.get_combined_minimum_size()
+	var top_scale := minf(1.0, available_width / _top_hud_row.size.x)
+	_top_hud_row.scale = Vector2.ONE * top_scale
+	var top_size := _top_hud_row.size * top_scale
+	var stage_right := (view_size.x + BATTLEFIELD_REFERENCE_SIZE.x) * 0.5
+	var top_right := minf(safe_size.x, stage_right - insets.x) - HUD_SIDE_MARGIN
+	_top_hud_row.position = Vector2(top_right - top_size.x, HUD_EDGE_MARGIN)
+
+	# Reserve space for the toolbar while keeping both ends of the board in view.
+	var field_top := GameData.GRID_ORIGIN.y - 34.0
+	var field_bottom := GameData.GRID_ORIGIN.y + GameData.CELL_SIZE.y * GameData.GRID_ROWS + 28.0
+	var view_top := insets.y + HUD_EDGE_MARGIN + top_size.y + 8.0
+	var view_bottom := insets.y + _bottom_hud.position.y - 8.0
+	var board_zoom := clampf((view_bottom - view_top) / (field_bottom - field_top), 0.5, 1.0)
+	var original_origin := (view_size.y - BATTLEFIELD_REFERENCE_SIZE.y * board_zoom) * 0.5
+	var origin_y := minf(original_origin, view_bottom - field_bottom * board_zoom)
+	origin_y = maxf(origin_y, view_top - field_top * board_zoom)
+	_camera.zoom = Vector2.ONE * board_zoom
+	_camera.position.y = (view_size.y * 0.5 - origin_y) / board_zoom
+	_camera.force_update_scroll()
+	_fit_world_backdrop.call()
+
+	var grid_left := view_size.x * 0.5 + (GameData.GRID_ORIGIN.x - _camera.position.x) * board_zoom - insets.x
+	var counter_room := maxf(1.0, grid_left - HUD_SIDE_MARGIN * 2.0)
+	var counter_scale := minf(1.10, counter_room / _flame_counter.size.x)
+	_flame_counter.scale = Vector2.ONE * counter_scale
+	var counter_size := _flame_counter.size * counter_scale
+	var counter_left := minf(_bottom_hud.position.x + 8.0, grid_left - counter_size.x - HUD_SIDE_MARGIN)
+	_flame_counter.position = Vector2(maxf(HUD_SIDE_MARGIN, counter_left), _bottom_hud.position.y - counter_size.y - 4.0)
+
+
+func _build_bottom_hud() -> void:
+	_bottom_hud = PanelContainer.new()
+	_bottom_hud.custom_minimum_size = Vector2(994.0, 114.0)
+	_bottom_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var panel := StyleBoxFlat.new()
+	panel.bg_color = Color(0.20, 0.095, 0.055, 0.96)
+	panel.border_color = Color(0.78, 0.48, 0.19)
+	panel.set_border_width_all(2)
+	panel.set_corner_radius_all(14)
+	panel.content_margin_left = 6.0
+	panel.content_margin_right = 6.0
+	panel.content_margin_top = 4.0
+	panel.content_margin_bottom = 4.0
+	_bottom_hud.add_theme_stylebox_override("panel", panel)
+	_hud_root.add_child(_bottom_hud)
+
+	var bottom_row := HBoxContainer.new()
+	bottom_row.add_theme_constant_override("separation", 8)
+	bottom_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bottom_hud.add_child(bottom_row)
+
+	# Seed cards
+	var deck_box := HBoxContainer.new()
+	deck_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	deck_box.add_theme_constant_override("separation", 4)
+	deck_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	deck_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	deck_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bottom_row.add_child(deck_box)
+
+	_seed_cards.clear()
+	for i in range(GameData.selected_deck.size()):
+		var did: String = GameData.selected_deck[i]
+		var card: SeedCard = SEED_CARD_SCRIPT.new()
+		card.setup(did, i)
+		card.card_pressed.connect(_on_card_pressed)
+		card.card_drag_started.connect(_on_card_drag_started)
+		deck_box.add_child(card)
+		_seed_cards.append(card)
+
+	_build_skills_bar(bottom_row)
+	_build_flame_counter()
+
+
+func _build_flame_counter() -> void:
+	var pill_wrap := Control.new()
+	_flame_counter = pill_wrap
+	pill_wrap.size = Vector2(166.0, 86.0)
+	pill_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud_root.add_child(pill_wrap)
+
+	var pill_bg := TextureRect.new()
+	pill_bg.texture = load("res://assets/sprites/ui/ui_resource_pill.png") as Texture2D
+	pill_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pill_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pill_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pill_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pill_wrap.add_child(pill_bg)
+
+	_flame_hud_icon = TextureRect.new()
+	_flame_hud_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_flame_hud_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_flame_hud_icon.custom_minimum_size = Vector2(40.0, 40.0)
+	_flame_hud_icon.texture = load("res://assets/sprites/ui/ui_spirit_flame.png") as Texture2D
+	_flame_hud_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pill_wrap.add_child(_flame_hud_icon)
+	_flame_hud_icon.position = Vector2(16.0, 23.0)
+	_flame_hud_icon.size = Vector2(40.0, 40.0)
+
+	_flame_label = Label.new()
+	_flame_label.text = str(spirit_flame)
+	_flame_label.position = Vector2(57.0, 23.0)
+	_flame_label.size = Vector2(91.0, 43.0)
+	_flame_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_flame_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_flame_label.add_theme_font_size_override("font_size", 27)
+	_flame_label.add_theme_color_override("font_color", Color(0.22, 0.11, 0.04))
+	_flame_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pill_wrap.add_child(_flame_label)
+
+
+func _build_skills_bar(parent: HBoxContainer) -> void:
 	var skill_row := HBoxContainer.new()
-	skill_row.anchor_top = 1.0
-	skill_row.anchor_bottom = 1.0
-	skill_row.offset_left = 12.0
-	skill_row.offset_right = 236.0
-	skill_row.offset_top = -84.0
-	skill_row.offset_bottom = -8.0
-	skill_row.add_theme_constant_override("separation", 6)
+	skill_row.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	skill_row.add_theme_constant_override("separation", 5)
 	skill_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud_root.add_child(skill_row)
+	parent.add_child(skill_row)
 
 	_skill_buttons.clear()
 	_skill_cooldowns.clear()
@@ -792,7 +914,7 @@ func _build_skills_bar() -> void:
 		var sdata: Dictionary = GameData.ACTIVE_SKILLS[sid]
 		_skill_cooldowns[sid] = 0.0
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(70, 72)
+		btn.custom_minimum_size = Vector2(88, 94)
 		btn.tooltip_text = "[%s] %s (%d Hỏa) — %s" % [sdata["hotkey"], sdata["name"], int(sdata["cost"]), sdata["desc"]]
 		btn.pressed.connect(trigger_active_skill.bind(sid))
 		btn.add_theme_stylebox_override("normal", empty_sb)
@@ -811,27 +933,31 @@ func _build_skills_bar() -> void:
 		var ic := TextureRect.new()
 		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		ic.position = Vector2(15, 11)
-		ic.size = Vector2(40, 38)
+		ic.position = Vector2(17, 14)
+		ic.size = Vector2(54, 53)
 		ic.texture = load(sdata["icon"]) as Texture2D
 		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		btn.add_child(ic)
 
 		var hk := Label.new()
 		hk.text = str(sdata["hotkey"])
-		hk.position = Vector2(8, 5)
-		hk.add_theme_font_size_override("font_size", 10)
-		hk.add_theme_color_override("font_color", Color(0.38, 0.16, 0.06))
+		hk.position = Vector2(9, 4)
+		hk.add_theme_font_size_override("font_size", 12)
+		hk.add_theme_color_override("font_color", Color(1.0, 0.89, 0.68))
+		hk.add_theme_color_override("font_outline_color", Color(0.22, 0.09, 0.04))
+		hk.add_theme_constant_override("outline_size", 3)
 		hk.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		btn.add_child(hk)
 
 		var cost_lbl := Label.new()
 		cost_lbl.name = "CostLbl"
-		cost_lbl.text = "FREE" if int(sdata["cost"]) == 0 else str(int(sdata["cost"]))
-		cost_lbl.position = Vector2(6, 51)
-		cost_lbl.size = Vector2(58, 16)
+		cost_lbl.text = "FREE" if int(sdata["cost"]) == 0 else str(sdata["cost"])
+		cost_lbl.position = Vector2(6, 69)
+		cost_lbl.size = Vector2(76, 20)
 		cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		cost_lbl.add_theme_font_size_override("font_size", 11)
+		cost_lbl.add_theme_font_size_override("font_size", 15)
+		cost_lbl.add_theme_color_override("font_outline_color", Color(1.0, 0.91, 0.68))
+		cost_lbl.add_theme_constant_override("outline_size", 3)
 		cost_lbl.add_theme_color_override("font_color", Color(0.16, 0.36, 0.12))
 		cost_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		btn.add_child(cost_lbl)
@@ -839,8 +965,8 @@ func _build_skills_bar() -> void:
 		var cd_mask := ColorRect.new()
 		cd_mask.name = "CdMask"
 		cd_mask.color = Color(0.05, 0.04, 0.08, 0.56)
-		cd_mask.position = Vector2(8, 8)
-		cd_mask.size = Vector2(54, 54)
+		cd_mask.position = Vector2(14, 13)
+		cd_mask.size = Vector2(60, 56)
 		cd_mask.visible = false
 		cd_mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		btn.add_child(cd_mask)
@@ -872,11 +998,30 @@ func _make_hud_icon_btn(tex_path: String, sz: Vector2, tip: String) -> TextureBu
 
 
 func _build_modals() -> void:
-	_modal_overlay = ColorRect.new()
+	_modal_overlay = Control.new()
 	_modal_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_modal_overlay.color = Color(0.05, 0.04, 0.06, 0.68)
+	_modal_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	_modal_overlay.visible = false
 	_hud_root.add_child(_modal_overlay)
+
+	var shadow_texture := GradientTexture2D.new()
+	var falloff := Gradient.new()
+	falloff.colors = PackedColorArray([Color(0.06, 0.04, 0.08, 0.48), Color(0.06, 0.04, 0.08, 0.0)])
+	shadow_texture.gradient = falloff
+	shadow_texture.fill = GradientTexture2D.FILL_RADIAL
+	shadow_texture.fill_from = Vector2(0.5, 0.5)
+	shadow_texture.fill_to = Vector2(0.5, 0.0)
+	var shadow := TextureRect.new()
+	shadow.texture = shadow_texture
+	shadow.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	shadow.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shadow.set_anchors_preset(Control.PRESET_CENTER)
+	shadow.offset_left = -430.0
+	shadow.offset_right = 430.0
+	shadow.offset_top = -305.0
+	shadow.offset_bottom = 305.0
+	_modal_overlay.add_child(shadow)
 
 	_modal_scroll = TextureRect.new()
 	_modal_scroll.texture = load("res://assets/sprites/ui/ui_panel_scroll.png") as Texture2D
@@ -893,10 +1038,11 @@ func _build_modals() -> void:
 	_modal_overlay.add_child(_modal_scroll)
 
 	_modal_banner = TextureRect.new()
-	_modal_banner.position = Vector2(105, -36)
-	_modal_banner.size = Vector2(350, 124)
+	_modal_banner.position = Vector2(105, -50)
+	_modal_banner.size = Vector2(350, 156)
 	_modal_banner.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_modal_banner.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_modal_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_modal_scroll.add_child(_modal_banner)
 
 	_modal_portrait = TextureRect.new()
@@ -908,17 +1054,18 @@ func _build_modals() -> void:
 	_modal_scroll.add_child(_modal_portrait)
 
 	var v := VBoxContainer.new()
-	v.position = Vector2(82, 76)
-	v.size = Vector2(396, 276)
+	v.position = Vector2(82, 132)
+	v.size = Vector2(396, 172)
 	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	v.add_theme_constant_override("separation", 12)
 	_modal_scroll.add_child(v)
 
 	_modal_title = Label.new()
+	_modal_title.size = Vector2(396, 44)
 	_modal_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_modal_title.add_theme_font_size_override("font_size", 28)
-	_modal_title.add_theme_color_override("font_color", Color(0.45, 0.14, 0.06))
-	v.add_child(_modal_title)
+	_modal_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_modal_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_modal_scroll.add_child(_modal_title)
 
 	_modal_stars_row = HBoxContainer.new()
 	_modal_stars_row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -955,6 +1102,18 @@ func _build_modals() -> void:
 	_modal_btn_menu.text = "Về Màn Hình Chọn Chương"
 	_modal_btn_menu.custom_minimum_size = Vector2(220, 34)
 	_modal_btn_menu.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var menu_button_style := StyleBoxFlat.new()
+	menu_button_style.bg_color = Color(0.98, 0.89, 0.69, 0.95)
+	menu_button_style.border_color = Color(0.57, 0.35, 0.18, 0.82)
+	menu_button_style.set_border_width_all(1)
+	menu_button_style.set_corner_radius_all(5)
+	var menu_button_hover := menu_button_style.duplicate() as StyleBoxFlat
+	menu_button_hover.bg_color = Color(1.0, 0.94, 0.78)
+	_modal_btn_menu.add_theme_stylebox_override("normal", menu_button_style)
+	_modal_btn_menu.add_theme_stylebox_override("hover", menu_button_hover)
+	_modal_btn_menu.add_theme_stylebox_override("pressed", menu_button_hover)
+	_modal_btn_menu.add_theme_color_override("font_color", Color(0.41, 0.20, 0.09))
+	_modal_btn_menu.add_theme_color_override("font_hover_color", Color(0.41, 0.20, 0.09))
 	_modal_btn_menu.pressed.connect(_on_back_to_menu)
 	v.add_child(_modal_btn_menu)
 
@@ -982,6 +1141,15 @@ func _build_modals() -> void:
 	p_lbl.add_theme_color_override("font_color", Color(0.98, 0.90, 0.72))
 	pv.add_child(p_lbl)
 	_hud_root.add_child(_portrait_overlay)
+	get_viewport().size_changed.connect(_update_orientation)
+	_update_orientation()
+
+
+func _update_orientation() -> void:
+	var viewport_size := get_viewport_rect().size
+	var portrait := viewport_size.y > viewport_size.x * 1.05
+	_portrait_overlay.visible = portrait
+	_world_root.process_mode = Node.PROCESS_MODE_DISABLED if portrait else Node.PROCESS_MODE_PAUSABLE
 
 
 func _make_action_btn(tex_path: String, text: String) -> TextureButton:
@@ -1005,11 +1173,7 @@ func _make_action_btn(tex_path: String, text: String) -> TextureButton:
 
 
 func _process(delta: float) -> void:
-	var vp := get_viewport_rect().size
-	if _portrait_overlay:
-		_portrait_overlay.visible = vp.y > vp.x * 1.05
-
-	if get_tree().paused or battle_ended:
+	if get_tree().paused or battle_ended or _portrait_overlay.visible:
 		return
 
 	# Update seed card cooldowns & afford states
@@ -1020,14 +1184,10 @@ func _process(delta: float) -> void:
 	_process_skills(delta)
 	_bg_time += delta
 
-	# Animated Koi pond water tiles (7.5 FPS continuous loop)
-	for kw in _koi_water_tiles:
-		var sp: Sprite2D = kw["node"]
-		var ph := float(kw["phase"]) + delta * 7.5
-		if ph >= 12.0:
-			ph -= 12.0
-		kw["phase"] = ph
-		sp.frame = clampi(int(floor(ph)), 0, 11)
+	if _water_material:
+		_water_material.set_shader_parameter("water_time", _bg_time)
+		for i in range(_pond_koi.size()):
+			_pond_koi[i].frame = posmod(floori(_bg_time * 7.5) + i * 4, 12)
 
 	# Living flora breeze sway
 	for fl in _flora_nodes:
@@ -1039,7 +1199,7 @@ func _process(delta: float) -> void:
 	for gl in _glow_nodes:
 		var sp: Sprite2D = gl["node"]
 		var ph := float(gl["phase"])
-		var pulse := 0.36 + sin(_bg_time * 3.4 + ph) * 0.10
+		var pulse := 0.27 + sin(_bg_time * 3.4 + ph) * 0.08
 		sp.modulate.a = pulse
 
 	# Drifting atmosphere (clouds, mist, fireflies, sunbeams, snow wind)
@@ -1080,9 +1240,8 @@ func _process(delta: float) -> void:
 		_camera.offset = Vector2.ZERO
 
 	# Natural Sky Spirit Flame drop
-	var nat_interval := float(level_cfg.get("natural_flame_interval", 8.5))
 	_natural_flame_timer += delta
-	if _natural_flame_timer >= nat_interval:
+	if _natural_flame_timer >= _natural_flame_interval():
 		_natural_flame_timer = 0.0
 		var col := randi_range(1, GameData.GRID_COLS - 2)
 		var row := randi_range(1, GameData.GRID_ROWS - 2)
@@ -1117,23 +1276,37 @@ func _process(delta: float) -> void:
 	_process_waves(delta)
 
 
+func _natural_flame_interval() -> float:
+	return float(level_cfg.get("natural_flame_interval", 8.5))
+
+
+func _preparation_speed() -> float:
+	return minf(speed_multiplier, PREPARATION_MAX_SPEED)
+
+
 func _process_waves(delta: float) -> void:
 	if not _spawn_queue.is_empty():
 		_spawn_stagger_timer -= delta
 		if _spawn_stagger_timer <= 0.0:
 			var next_spawn: Dictionary = _spawn_queue.pop_front()
 			spawn_enemy(next_spawn["id"], int(next_spawn["lane"]))
-			_spawn_stagger_timer = 0.65
+			_spawn_stagger_timer = OPENING_SPAWN_STAGGER if _wave_index == 1 else 0.65
 		return
 
 	var waves: Array = level_cfg.get("waves", [])
 	if _wave_index < waves.size():
-		var time_step := delta * (2.5 if (GameData.auto_play_active and _count_active_enemies() == 0) else 1.0)
+		var preparing := _wave_index == 0
+		var time_step := delta
+		if not preparing and GameData.auto_play_active and _count_active_enemies() == 0:
+			time_step *= 2.5
 		_wave_timer += time_step
 		var next_wave: Dictionary = waves[_wave_index]
-		if _wave_timer >= float(next_wave["delay"]):
+		var delay := float(next_wave["delay"]) * (1.0 if preparing else COMBAT_WAVE_DELAY_MULTIPLIER)
+		if _wave_timer >= delay:
 			_wave_timer = 0.0
 			_wave_index += 1
+			if preparing:
+				Engine.time_scale = speed_multiplier
 			_update_wave_hud()
 			if bool(next_wave.get("huge", false)):
 				_show_huge_wave_banner()
@@ -1144,7 +1317,7 @@ func _process_waves(delta: float) -> void:
 					"id": str(spawns[i]),
 					"lane": (i + lane_offset) % GameData.GRID_ROWS,
 				})
-			if GameData.auto_play_active:
+			if GameData.auto_play_active and not preparing:
 				var extra_pool := ["tieu_yeu", "oni_nho", "kappa", "nekomata", "tengu", "samurai_ma", "ran_ong"]
 				for r in range(spawns.size(), GameData.GRID_ROWS):
 					var extra_id: String = extra_pool[(level_id + _wave_index + r) % extra_pool.size()]
@@ -1153,6 +1326,8 @@ func _process_waves(delta: float) -> void:
 						"lane": (r + lane_offset) % GameData.GRID_ROWS,
 					})
 			_spawn_stagger_timer = 0.0
+		elif preparing:
+			_update_preparation_label(delay)
 	else:
 		if _count_active_enemies() == 0:
 			_trigger_victory()
@@ -1178,12 +1353,12 @@ func _show_banner(msg: String) -> void:
 
 
 func _show_huge_wave_banner() -> void:
-	AudioManager.play_sfx("wave_horn", -3.0)
+	AudioManager.play_sfx("temple_bell", -3.0, 0.0)
 	_show_banner("ĐỢT YÊU QUÁI LỚN ĐANG TRÀN TỚI!")
 
 
 func _input(event: InputEvent) -> void:
-	if battle_ended:
+	if battle_ended or (_portrait_overlay and _portrait_overlay.visible):
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -1214,45 +1389,50 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseMotion:
-		var world_pos := get_global_mouse_position()
-		_collect_flames_near(world_pos)
-		var probe := world_pos + (Vector2(0.0, -42.0) if is_dragging_card else Vector2.ZERO)
-		_update_hover_preview(probe)
+		var motion := event as InputEventMouseMotion
+		var viewport_to_world := get_canvas_transform().affine_inverse()
+		var world_pos := viewport_to_world * motion.position
+		var previous_pos := viewport_to_world * (motion.position - motion.relative)
+		_collect_flames_along(previous_pos, world_pos)
+		_update_hover_preview(world_pos)
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		var world_pos := get_global_mouse_position()
+		var world_pos := get_canvas_transform().affine_inverse() * mb.position
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			_clear_selection()
 			return
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				# Ignore clicks in HUD top strip & bottom-left active skill bar
-				if world_pos.y <= 112.0 or (world_pos.x <= 230.0 and world_pos.y >= 630.0):
+				if _hud_contains(_top_hud_row, mb.position) or _hud_contains(_bottom_hud, mb.position):
 					return
-				_pointer_down_on_field = true
-				if _collect_flames_near(world_pos):
+				if _collect_flames_along(world_pos, world_pos):
 					return
 				if not is_dragging_card:
 					_handle_grid_tap(world_pos)
-			else:
-				if is_dragging_card:
-					var probe := world_pos + Vector2(0.0, -42.0)
-					_handle_grid_tap(probe)
-					is_dragging_card = false
-					_clear_selection()
-				_pointer_down_on_field = false
+			elif is_dragging_card:
+				_handle_grid_tap(world_pos)
+				_clear_selection()
 
 
-func _collect_flames_near(world_pos: Vector2) -> bool:
+func _hud_contains(control: Control, viewport_pos: Vector2) -> bool:
+	var local_pos := control.get_global_transform_with_canvas().affine_inverse() * viewport_pos
+	return Rect2(Vector2.ZERO, control.size).has_point(local_pos)
+
+
+func _collect_flames_along(from: Vector2, to: Vector2) -> bool:
 	var hit_any := false
 	for node in _flame_layer.get_children():
-		if node is SpiritFlame and not node.collected and node.is_point_inside(world_pos):
+		if node is not SpiritFlame or node.collected:
+			continue
+		var closest := Geometry2D.get_closest_point_to_segment(node.position, from, to)
+		if node.is_point_inside(closest):
 			node.collect()
 			hit_any = true
 	return hit_any
 
 
 func _update_hover_preview(probe_pos: Vector2) -> void:
+	_occupied_hint.hide()
 	if selected_defender_id == "" and not shovel_mode:
 		_cell_highlight.visible = false
 		_ghost_sprite.visible = false
@@ -1271,12 +1451,15 @@ func _update_hover_preview(probe_pos: Vector2) -> void:
 	_cell_highlight.position = GameData.GRID_ORIGIN + Vector2(cell.y * GameData.CELL_SIZE.x, cell.x * GameData.CELL_SIZE.y)
 
 	if shovel_mode:
-		var has_def := _grid_defenders[cell.x][cell.y] != null and is_instance_valid(_grid_defenders[cell.x][cell.y])
-		var has_obs := _grid_obstacles[cell.x][cell.y] != null and is_instance_valid(_grid_obstacles[cell.x][cell.y])
-		_cell_highlight.color = Color(0.95, 0.28, 0.25, 0.42) if (has_def or has_obs) else Color(0.7, 0.7, 0.7, 0.18)
+		_cell_highlight.color = Color(0.95, 0.28, 0.25, 0.42) if _is_cell_occupied(cell.x, cell.y) else Color(0.7, 0.7, 0.7, 0.18)
 		_ghost_sprite.visible = false
 		if _plant_ring:
 			_plant_ring.visible = false
+	elif _is_cell_occupied(cell.x, cell.y):
+		_cell_highlight.color = Color(1.0, 0.66, 0.16, 0.30)
+		_occupied_hint.show()
+		_ghost_sprite.hide()
+		_plant_ring.hide()
 	else:
 		var can_place := can_plant_at(cell.x, cell.y, selected_defender_id)
 		_cell_highlight.color = Color(0.28, 0.96, 0.42, 0.26) if can_place else Color(0.95, 0.28, 0.25, 0.30)
@@ -1321,7 +1504,7 @@ func _on_card_pressed(did: String, idx: int) -> void:
 	_ghost_sprite.texture = load(GameData.DEFENDERS[did]["icon"]) as Texture2D
 
 
-func _on_card_drag_started(did: String, idx: int, _global_pos: Vector2) -> void:
+func _on_card_drag_started(did: String, idx: int, viewport_pos: Vector2) -> void:
 	if get_tree().paused or battle_ended:
 		return
 	var card: SeedCard = _seed_cards[idx]
@@ -1333,6 +1516,7 @@ func _on_card_drag_started(did: String, idx: int, _global_pos: Vector2) -> void:
 	selected_card_idx = idx
 	is_dragging_card = true
 	_ghost_sprite.texture = load(GameData.DEFENDERS[did]["icon"]) as Texture2D
+	_update_hover_preview(get_canvas_transform().affine_inverse() * viewport_pos)
 
 
 func _clear_selection() -> void:
@@ -1369,9 +1553,10 @@ func set_game_speed(mult: float) -> void:
 	speed_multiplier = mult
 	GameData.game_speed_multiplier = mult
 	speed_2x = is_equal_approx(mult, 2.0)
-	Engine.time_scale = mult
+	Engine.time_scale = _preparation_speed() if _wave_index == 0 else mult
 	if _speed_badge:
 		_speed_badge.text = "%dx" % int(round(mult))
+	_update_wave_hud()
 
 
 func _on_toggle_speed() -> void:
@@ -1439,15 +1624,25 @@ func _resume_game() -> void:
 	get_tree().paused = false
 
 
+func _set_modal_heading(title: String, ribbon: Texture2D = null) -> void:
+	_modal_banner.texture = ribbon
+	_modal_banner.visible = ribbon != null
+	_modal_title.text = title
+	_modal_title.position = Vector2(82.0, 13.0 if ribbon else 95.0)
+	_modal_title.add_theme_font_size_override("font_size", 23 if ribbon else 28)
+	_modal_title.add_theme_color_override("font_color", Color(1.0, 0.95, 0.81) if ribbon else Color(0.45, 0.14, 0.06))
+	_modal_title.add_theme_color_override("font_outline_color", Color(0.30, 0.13, 0.12))
+	_modal_title.add_theme_constant_override("outline_size", 4 if ribbon else 0)
+
+
 func _show_pause_modal() -> void:
 	get_tree().paused = true
 	_modal_overlay.visible = true
-	_modal_banner.visible = false
+	_set_modal_heading("TẠM DỪNG")
 	if _modal_portrait:
 		_modal_portrait.visible = true
 		_modal_portrait.texture = load("res://assets/sprites/ui/gardener_tutorial.png") as Texture2D
 	_modal_stars_row.visible = false
-	_modal_title.text = "TẠM DỪNG"
 	_modal_subtitle.text = "%s — Đợt %d / %d" % [level_cfg["name"], _wave_index, level_cfg["waves"].size()]
 	_rebind_btn(_modal_btn_primary, _resume_game)
 	_modal_btn_primary_lbl.text = "TIẾP TỤC"
@@ -1475,12 +1670,10 @@ func _trigger_victory() -> void:
 	var reward_jade := GameData.record_level_win(level_id, stars)
 
 	_modal_overlay.visible = true
-	_modal_banner.visible = true
-	_modal_banner.texture = load("res://assets/sprites/ui/ui_banner_victory.png") as Texture2D
+	_set_modal_heading("CHIẾN THẮNG!", preload("res://assets/sprites/ui/ui_banner_victory.png"))
 	if _modal_portrait:
 		_modal_portrait.visible = true
 		_modal_portrait.texture = load("res://assets/sprites/ui/gardener_victory.png") as Texture2D
-	_modal_title.text = "CHIẾN THẮNG!"
 	_modal_stars_row.visible = true
 	var tex_on := load("res://assets/sprites/ui/ui_star_earned.png") as Texture2D
 	var tex_off := load("res://assets/sprites/ui/ui_star_empty.png") as Texture2D
@@ -1491,10 +1684,11 @@ func _trigger_victory() -> void:
 	if level_id < GameData.LEVELS.size():
 		_rebind_btn(_modal_btn_primary, _next_level)
 		_modal_btn_primary_lbl.text = "MÀN TIẾP"
+		_modal_btn_secondary.show()
 	else:
 		_rebind_btn(_modal_btn_primary, _restart_level)
 		_modal_btn_primary_lbl.text = "CHƠI LẠI"
-	_modal_btn_secondary.visible = true
+		_modal_btn_secondary.hide()
 	_rebind_btn(_modal_btn_secondary, _restart_level)
 	_modal_btn_secondary_lbl.text = "ĐẤU LẠI"
 
@@ -1514,12 +1708,10 @@ func _trigger_defeat() -> void:
 	AudioManager.play_sfx("defeat", -2.0)
 
 	_modal_overlay.visible = true
-	_modal_banner.visible = true
-	_modal_banner.texture = load("res://assets/sprites/ui/ui_banner_defeat.png") as Texture2D
+	_set_modal_heading("THẤT BẠI!", preload("res://assets/sprites/ui/ui_banner_defeat.png"))
 	if _modal_portrait:
 		_modal_portrait.visible = true
 		_modal_portrait.texture = load("res://assets/sprites/ui/gardener_worried.png") as Texture2D
-	_modal_title.text = "THẤT BẠI!"
 	_modal_stars_row.visible = false
 	_modal_subtitle.text = "Yokai đã tiến vào ngôi nhà cổ Edo! Hãy điều chỉnh đội hình và thử lại."
 	_rebind_btn(_modal_btn_primary, _restart_level)
@@ -1651,7 +1843,10 @@ func _update_wave_hud() -> void:
 	var waves_arr: Array = level_cfg.get("waves", [])
 	var total: int = waves_arr.size()
 	if _wave_label:
-		_wave_label.text = "Đợt %d / %d" % [_wave_index, total]
+		if _wave_index == 0 and total > 0:
+			_update_preparation_label(float(waves_arr[0]["delay"]))
+		else:
+			_wave_label.text = "Đợt %d / %d" % [_wave_index, total]
 	if total > 0 and _wave_fill_clip and _wave_oni_head:
 		var ratio := clampf(float(_wave_index) / float(total), 0.05, 1.0)
 		_wave_fill_clip.size.x = 136.0 * ratio
@@ -1659,12 +1854,19 @@ func _update_wave_hud() -> void:
 		_wave_oni_head.size = Vector2(28.0, 28.0)
 
 
+func _update_preparation_label(delay: float) -> void:
+	var seconds_left := ceili((delay - _wave_timer) / _preparation_speed())
+	_wave_label.text = "Chuẩn bị · %ds" % seconds_left
+
+
+func _is_cell_occupied(row: int, col: int) -> bool:
+	return is_instance_valid(_grid_defenders[row][col]) or is_instance_valid(_grid_obstacles[row][col])
+
+
 func can_plant_at(row: int, col: int, did: String) -> bool:
 	if row < 0 or row >= GameData.GRID_ROWS or col < 0 or col >= GameData.GRID_COLS:
 		return false
-	if _grid_defenders[row][col] != null and is_instance_valid(_grid_defenders[row][col]):
-		return false
-	if _grid_obstacles[row][col] != null and is_instance_valid(_grid_obstacles[row][col]):
+	if _is_cell_occupied(row, col):
 		return false
 	var cost := int(GameData.DEFENDERS[did]["cost"])
 	return spirit_flame >= cost
@@ -1673,9 +1875,7 @@ func can_plant_at(row: int, col: int, did: String) -> bool:
 func try_plant_defender(did: String, row: int, col: int, card_idx: int = -1, ignore_cost_and_cd: bool = false) -> Defender:
 	if row < 0 or row >= GameData.GRID_ROWS or col < 0 or col >= GameData.GRID_COLS:
 		return null
-	if _grid_defenders[row][col] != null and is_instance_valid(_grid_defenders[row][col]):
-		return null
-	if _grid_obstacles[row][col] != null and is_instance_valid(_grid_obstacles[row][col]):
+	if _is_cell_occupied(row, col):
 		return null
 	var cost := int(GameData.DEFENDERS[did]["cost"])
 	if not ignore_cost_and_cd:
@@ -1771,8 +1971,9 @@ func remove_obstacle(obs: Obstacle) -> void:
 
 func spawn_enemy(eid: String, lane: int, x_pos: float = -1.0) -> Enemy:
 	var clane := clampi(lane, 0, GameData.GRID_ROWS - 1)
-	var sx := x_pos if x_pos > 0.0 else randf_range(1155.0, 1205.0)
-	var sy := GameData.GRID_ORIGIN.y + (clane + 0.5) * GameData.CELL_SIZE.y
+	var grid_right := GameData.GRID_ORIGIN.x + GameData.GRID_COLS * GameData.CELL_SIZE.x
+	var sx := x_pos if x_pos > 0.0 else grid_right + randf_range(31.0, 41.0)
+	var sy := GameData.cell_to_world(clane, 0).y
 	var enemy: Enemy = ENEMY_SCRIPT.new()
 	enemy.setup(self, eid, clane, Vector2(sx, sy))
 	_enemy_layer.add_child(enemy)
@@ -1819,17 +2020,53 @@ func spawn_vfx(
 	loop_duration: float = 0.0,
 	velocity: Vector2 = Vector2.ZERO
 ) -> VfxEffect:
-	var vfx: VfxEffect = VFX_SCRIPT.new()
+	var effect_name := tex_path.get_file().get_basename()
+	var ground_effect := GROUND_VFX_OFFSETS.has(effect_name)
+	pos.y += float(GROUND_VFX_OFFSETS.get(effect_name, 0.0))
+	# Closely overlapping one-shots can share a visual cue.
+	var opacity := 1.0
+	if COMBAT_VFX.has(effect_name):
+		if loop_duration <= 0.0 and velocity == Vector2.ZERO:
+			for active in _vfx_layer.get_children():
+				if active is VfxEffect and active.is_processing() and active.get_meta("effect_name", "") == effect_name:
+					if active.position.distance_squared_to(pos) < 36.0 * 36.0:
+						return active as VfxEffect
+		var tuning: Vector3 = COMBAT_VFX[effect_name]
+		target_scale *= tuning.x
+		opacity = tuning.y
+		fps *= tuning.z
+	if not _vfx_textures.has(tex_path):
+		_vfx_textures[tex_path] = load(tex_path) as Texture2D
+	var vfx: VfxEffect
+	if _idle_vfx.is_empty():
+		vfx = VFX_SCRIPT.new()
+		vfx.finished.connect(_recycle_vfx)
+		_vfx_layer.add_child(vfx)
+	else:
+		vfx = _idle_vfx.pop_back()
+		_vfx_layer.move_child(vfx, -1)
 	vfx.position = pos
-	vfx.z_index = 70
-	vfx.setup(tex_path, grid, fps, target_scale, loop_duration, velocity)
-	_vfx_layer.add_child(vfx)
+	vfx.z_index = 18 if ground_effect else 70
+	vfx.set_meta("effect_name", effect_name)
+	vfx.setup(_vfx_textures[tex_path], grid, fps, target_scale, loop_duration, velocity, Color(1, 1, 1, opacity))
 	return vfx
+
+
+func _recycle_vfx(effect: VfxEffect) -> void:
+	if _idle_vfx.size() < VFX_POOL_LIMIT:
+		_idle_vfx.append(effect)
+	else:
+		effect.queue_free()
+
+
+func get_flame_hud_target() -> Vector2:
+	var icon_center := _flame_hud_icon.get_global_transform_with_canvas() * (_flame_hud_icon.size * 0.5)
+	return _flame_layer.get_global_transform_with_canvas().affine_inverse() * icon_center
 
 
 func spawn_spirit_flame(start_pos: Vector2, ground_pos: Vector2, amount: int = 25, sky_drop: bool = false) -> SpiritFlame:
 	var fl: SpiritFlame = FLAME_SCRIPT.new()
-	fl.setup(self, start_pos, ground_pos, _flame_pill_pos, amount, sky_drop)
+	fl.setup(self, start_pos, ground_pos, amount, sky_drop)
 	_flame_layer.add_child(fl)
 	return fl
 
@@ -1909,6 +2146,7 @@ func _flash_auto_placement(did: String, row: int, col: int) -> void:
 		return
 	if selected_defender_id != "" or shovel_mode:
 		return
+	_occupied_hint.hide()
 	_cell_highlight.position = GameData.GRID_ORIGIN + Vector2(col * GameData.CELL_SIZE.x, row * GameData.CELL_SIZE.y)
 	_cell_highlight.color = Color(0.28, 0.96, 0.42, 0.28)
 	_cell_highlight.visible = true
@@ -1963,11 +2201,6 @@ func _setup_auto_play_showcase_formation() -> void:
 	# Col 5: Forward Stun Traps (Phù Chú) where free of obstacles
 	for r in [1, 3]:
 		try_plant_defender("phu_chu", r, 5, -1, true)
-
-	# Spawn opening 5-lane Yokai vanguard so combat, shooting, hit & death animations begin immediately
-	var openers := ["tieu_yeu", "oni_nho", "kappa", "tengu", "samurai_ma"]
-	for r in range(GameData.GRID_ROWS):
-		spawn_enemy(openers[r], r, 1045.0 + float(r) * 28.0)
 
 
 func _step_auto_play_decision() -> void:

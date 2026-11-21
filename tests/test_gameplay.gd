@@ -2,6 +2,9 @@ extends SceneTree
 
 ## Comprehensive automated headless gameplay verification for Edo Garden Defense.
 
+const SAFE_AREA := preload("res://scripts/ui/safe_area.gd")
+const SCENERY := preload("res://scripts/battle/scenery.gd")
+
 var _failures: Array[String] = []
 
 
@@ -34,6 +37,12 @@ func _run_all_tests() -> void:
 	var audio_mgr = root.get_node_or_null("AudioManager")
 	_assert(game_data != null, "GameData autoload exists")
 	_assert(audio_mgr != null, "AudioManager autoload exists")
+
+	# Mobile safe-area rects are supplied in screen pixels, while HUD layout
+	# uses logical viewport units and may be scaled by canvas_items stretch.
+	var insets := SAFE_AREA.scaled_insets(Rect2i(10, 20, 2560, 1440), Rect2i(170, 84, 2260, 1320), Vector2(1280, 720))
+	_assert(insets.is_equal_approx(Vector4(80, 32, 70, 28)), "Safe area preserves asymmetric cutouts under 2x viewport scaling")
+	_assert(SAFE_AREA.scaled_insets(Rect2i(0, 0, 1280, 720), Rect2i(), Vector2(1280, 720)) == Vector4.ZERO, "Unavailable safe area preserves viewport margins")
 
 	# 1. Verify all 10 Defenders, 10 Enemies, and 5 Levels textures load cleanly
 	for did in game_data.DEFENDER_ORDER:
@@ -73,14 +82,23 @@ func _run_all_tests() -> void:
 	_assert(game_data.jade_gems == 5, "3 upgrades at 5 Jade each leave 5 Jade")
 
 	for lvl in game_data.LEVELS:
-		_assert(ResourceLoader.exists("res://assets/sprites/tiles/%s_0.png" % lvl["tile_primary"]), "Missing tile_primary for level %d" % lvl["id"])
+		var terrain_variants: Vector2i = lvl["terrain_variants"]
+		_assert(ResourceLoader.exists("res://assets/sprites/tiles/%s_%d.png" % [lvl["tile_primary"], terrain_variants.x]), "Missing main terrain texture for level %d" % lvl["id"])
+		_assert(ResourceLoader.exists("res://assets/sprites/tiles/%s_%d.png" % [lvl["tile_alt"], terrain_variants.y]), "Missing accent terrain texture for level %d" % lvl["id"])
 		_assert(ResourceLoader.exists(lvl["ambient_particle"]), "Missing ambient particle for level %d" % lvl["id"])
 		_assert(ResourceLoader.exists(lvl["top_border"]), "Missing top_border for level %d" % lvl["id"])
 		_assert(ResourceLoader.exists(lvl["lawn_edge"]), "Missing lawn_edge for level %d" % lvl["id"])
-		_assert(ResourceLoader.exists(lvl["house_tex"]), "Missing house_tex for level %d" % lvl["id"])
-		_assert(ResourceLoader.exists(lvl["gate_tex"]), "Missing gate_tex for level %d" % lvl["id"])
-		for fp in lvl["biome_flora"]:
-			_assert(ResourceLoader.exists(fp), "Missing biome_flora %s for level %d" % [fp, lvl["id"]])
+		var scenery_paths := [lvl["house_tex"], lvl["gate_tex"],
+			lvl.get("stone_path_tex", "res://assets/sprites/environments/env_path_stepping_stones.png")]
+		scenery_paths.append_array(lvl["biome_flora"])
+		for scenery_path: String in scenery_paths:
+			var texture := load(scenery_path) as Texture2D
+			_assert(texture != null, "Missing chapter scenery %s" % scenery_path)
+			var contact: Vector3 = SCENERY.GROUND_CONTACTS.get(scenery_path.get_file().get_basename(), Vector3.ZERO)
+			if texture:
+				var source_rect := Rect2(Vector2.ZERO, texture.get_size())
+				_assert(source_rect.has_point(Vector2(contact.x, contact.y)) and contact.z > 0.0 and contact.z <= texture.get_width(),
+					"Invalid scenery contact or visible width for %s" % scenery_path)
 		for p_idx in range(4):
 			_assert(ResourceLoader.exists("res://assets/sprites/backgrounds/%s_%d.png" % [lvl["bg_stem"], p_idx]), "Missing background panel %d for level %d" % [p_idx, lvl["id"]])
 
@@ -146,6 +164,22 @@ func _run_all_tests() -> void:
 	_assert(battle.is_water_lane(2), "Chapter 3 lane 2 is Koi water lane")
 	_assert(battle.get_all_obstacles().size() == 4, "Chapter 3 spawns its 4 configured obstacles")
 
+	for level in game_data.LEVELS:
+		_assert(float(level["waves"][0]["delay"]) >= 26.0, "Chapter %d has at least 13 real seconds at 5x" % level["id"])
+		_assert(int(level["starting_flame"]) >= 2 * int(game_data.DEFENDERS["than_den"]["cost"]) + int(game_data.DEFENDERS["bi_ngo"]["cost"]),
+			"Chapter %d can afford two lamps and a blocker without upgrades or drops" % level["id"])
+	battle.set_game_speed(5.0)
+	_assert(is_equal_approx(Engine.time_scale, 2.0) and battle._wave_label.text.begins_with("Chuẩn bị"), "At 5x the opening runs on a shared 2x preparation clock")
+	battle._wave_timer = 0.0
+	battle._process_waves(27.9)
+	_assert(battle._wave_index == 0 and battle._spawn_queue.is_empty(), "Ch3 keeps the board clear for 14 real seconds at 5x")
+	battle._process_waves(0.2)
+	_assert(battle._wave_index == 1 and battle._spawn_queue.size() == 2 and is_equal_approx(Engine.time_scale, 5.0), "Ch3 restores 5x at the start of the first wave")
+	battle._spawn_queue.clear()
+	battle._wave_index = 0
+	battle._wave_timer = 0.0
+	battle.set_game_speed(1.0)
+
 	# Test Obstacle placement lock, thorns reflection, Sake barrel explosion & Shovel clearing
 	var obs_block_fail = battle.try_plant_defender("dao_tien", 1, 6, -1, true)
 	_assert(obs_block_fail == null, "Cannot plant directly on top of an obstacle")
@@ -162,7 +196,7 @@ func _run_all_tests() -> void:
 
 	# Test Planting & Shovel refund
 	var start_flame: int = battle.spirit_flame
-	_assert(start_flame == 225, "Festival Lantern grants +50 starting flame on Ch3 (175 + 50 = 225)")
+	_assert(start_flame == 250, "Festival Lantern grants +50 starting flame on Ch3 (200 + 50 = 250)")
 	var planted_dao = battle.try_plant_defender("dao_tien", 0, 1, -1, false)
 	_assert(planted_dao != null, "Đào Tiên plants with sufficient flame")
 	_assert(is_equal_approx(planted_dao.max_hp, 384.0), "Bento Box grants +20% defender HP (320 -> 384)")
@@ -189,8 +223,19 @@ func _run_all_tests() -> void:
 	_assert(d_than != null and d_dao != null and d_tre != null and d_ice != null, "P0 shooters/producer planted")
 	_assert(d_nam != null and d_bi != null and d_heal != null and d_wind != null and d_trap != null, "Remaining defenders planted")
 
-	# Force Thần Đèn production & test SpiritFlame collection
+	# Advance Thần Đèn from placement through its first production animation.
 	var pre_flame: int = battle.spirit_flame
+	var flame_count: int = battle._flame_layer.get_child_count()
+	for i in range(108):
+		d_than._process_standard_defender(1.0 / 60.0)
+	_assert(battle._flame_layer.get_child_count() == flame_count, "Thần Đèn plays its wind-up before dropping its first flame")
+	for i in range(24):
+		d_than._process_standard_defender(1.0 / 60.0)
+	var lantern_flame = battle._flame_layer.get_child(-1)
+	var produced: bool = battle._flame_layer.get_child_count() == flame_count + 1
+	_assert(produced and lantern_flame.amount == 30, "Thần Đèn produces 30 flame within 2.2 simulation seconds of planting")
+	if produced:
+		lantern_flame.queue_free()
 	var fl = battle.spawn_spirit_flame(Vector2(300, 200), Vector2(300, 240), 25, false)
 	fl.collect()
 	_assert(battle.spirit_flame == pre_flame + 25, "SpiritFlame collect adds +25")
@@ -209,9 +254,13 @@ func _run_all_tests() -> void:
 	d_bi.take_damage(120.0)
 	d_bi.apply_freeze(4.5)
 	_assert(d_bi.frozen_timer > 0.0, "Yuki-onna freeze freezes defender")
+	_assert(d_bi._frost_sprite.show_behind_parent and d_bi._health_bar.visible and d_bi._health_bar.z_index > d_bi.z_index,
+		"Frozen defender keeps its body and damaged health bar above the ice")
 	var damaged_hp: float = d_bi.hp
 	d_heal._execute_action_effect()
 	_assert(d_bi.hp > damaged_hp and d_bi.frozen_timer == 0.0, "Chữa Lành heals ally and cleanses freeze")
+	d_bi.heal(d_bi.max_hp)
+	_assert(not d_bi._health_bar.visible, "A fully healed defender hides its health bar")
 
 	# Test Gió Lốc anti-air vs Tengu (travelling wind wave + smooth slide + Boss knockback resistance)
 	var tengu = battle.spawn_enemy("tengu", 4, 520.0)
@@ -228,12 +277,19 @@ func _run_all_tests() -> void:
 			if not tengu.is_flying:
 				break
 	_assert(not tengu.is_flying and tengu.hp < 250.0, "Gió Lốc grounds flying Tengu and deals anti-air damage")
+	_assert(is_equal_approx(tengu._sprite.position.y, game_data.LANE_CONTACT_OFFSET), "Grounded Tengu shadow and sprite share the lane contact origin")
+	for frame in range(12):
+		tengu._set_body_frame(frame)
+		var foot_y: float = tengu._sprite.offset.y + float(tengu.TENGU_FLY_CONTACT[frame]) - 64.0
+		_assert(is_zero_approx(foot_y), "Grounded Tengu flight frame %d rests on the same contact row" % frame)
+	tengu._set_body_frame(tengu._frame_idx)
 	_assert(tengu._kb_remaining > 0.0 and is_equal_approx(tengu.position.x, 520.0), "Wind hit queues smooth slide instead of 1-frame teleport")
 	for _k in range(12):
 		tengu._process(0.05)
 	_assert(tengu.position.x > 610.0 and tengu.position.x <= 645.0 and is_equal_approx(tengu._kb_remaining, 0.0), "Tengu finishes smooth wind slide cleanly")
 
 	var boss_kb = battle.spawn_enemy("oni_lon", 4, 860.0)
+	_assert(is_equal_approx(boss_kb._sprite.offset.y, -88.0), "192 px boss atlas uses the measured 8 px ground margin")
 	boss_kb.knockback(115.0)
 	_assert(boss_kb._kb_remaining > 20.0 and boss_kb._kb_remaining <= 32.0 and boss_kb._kb_cooldown >= 7.5, "Boss applies reduced knockback with immunity cooldown")
 	var kb_before: float = boss_kb._kb_remaining
@@ -294,7 +350,8 @@ func _run_all_tests() -> void:
 	battle._on_toggle_speed()
 	_assert(battle.speed_2x and is_equal_approx(Engine.time_scale, 2.0), "Speed toggles to 2x")
 	battle._on_toggle_speed()
-	_assert(not battle.speed_2x and is_equal_approx(Engine.time_scale, 5.0) and is_equal_approx(battle.speed_multiplier, 5.0), "Speed toggles to 5x")
+	var expected_speed := 2.0 if battle._wave_index == 0 else 5.0
+	_assert(not battle.speed_2x and is_equal_approx(Engine.time_scale, expected_speed) and is_equal_approx(battle.speed_multiplier, 5.0), "Speed selects 5x with a 2x cap during preparation")
 	battle._on_toggle_speed()
 	_assert(not battle.speed_2x and is_equal_approx(Engine.time_scale, 1.0), "Speed toggles back to 1x")
 
@@ -310,6 +367,18 @@ func _run_all_tests() -> void:
 	game_data.stop_auto_play()
 	battle.set_game_speed(1.0)
 
+	# A fast pointer movement collects both orbs along the path, including
+	# when the platform emits only one emulated mouse event for a touch swipe.
+	var swipe_a = battle.spawn_spirit_flame(Vector2(480, 410), Vector2(480, 410))
+	var swipe_b = battle.spawn_spirit_flame(Vector2(640, 410), Vector2(640, 410))
+	var outside_swipe = battle.spawn_spirit_flame(Vector2(560, 510), Vector2(560, 510))
+	var view: Transform2D = battle.get_canvas_transform()
+	var swipe := InputEventMouseMotion.new()
+	swipe.position = view * Vector2(760, 410)
+	swipe.relative = swipe.position - (view * Vector2(380, 410))
+	battle._input(swipe)
+	_assert(swipe_a.collected and swipe_b.collected and not outside_swipe.collected, "Fast swipe collects orbs along its path only")
+
 	# Let a few frames tick to verify zero runtime errors during active combat
 	for _i in range(20):
 		await process_frame
@@ -317,6 +386,7 @@ func _run_all_tests() -> void:
 	# Test Victory flow
 	battle._trigger_victory()
 	_assert(battle.battle_ended and battle._modal_overlay.visible, "Victory triggers modal cleanly")
+	_assert(battle._modal_banner.visible and battle._modal_btn_secondary.visible, "Chapter victory offers a result banner and manual replay")
 
 	battle.queue_free()
 	await process_frame
@@ -326,11 +396,76 @@ func _run_all_tests() -> void:
 	var showcase := battle_scene.instantiate()
 	root.add_child(showcase)
 	await process_frame
+
+	# An ordinary drop near the top of a lane must still land in that lane.
+	var drag_card = showcase._seed_cards[0]
+	var drop_cell_center: Vector2 = game_data.cell_to_world(1, 2)
+	var drop_position: Vector2 = showcase.get_canvas_transform() * (drop_cell_center - Vector2(0, 18))
+	showcase._on_card_drag_started(drag_card.defender_id, 0, drop_position)
+	_assert(showcase._ghost_sprite.visible and showcase._ghost_sprite.position.is_equal_approx(drop_cell_center), "The first drag motion previews the cell under the pointer")
+	var drag_motion := InputEventMouseMotion.new()
+	drag_motion.position = drop_position
+	showcase._input(drag_motion)
+	_assert(showcase._ghost_sprite.visible and showcase._ghost_sprite.position.is_equal_approx(drop_cell_center), "Dragging near a lane boundary previews the cell under the pointer")
+	var drag_release := InputEventMouseButton.new()
+	drag_release.button_index = MOUSE_BUTTON_LEFT
+	drag_release.position = drop_position
+	showcase._input(drag_release)
+	_assert(showcase._grid_defenders[1][2] != null and showcase._grid_defenders[0][2] == null, "Releasing a card plants it in the intended lane")
+	showcase.dig_defender(1, 2)
+
 	showcase._setup_auto_play_showcase_formation()
 	_assert(showcase.get_all_defenders().size() == 27, "Showcase formation plants all 27 role-slotted defenders cleanly without overlap")
 	_assert(showcase._grid_defenders[0][0].defender_id == "than_den" and showcase._grid_defenders[0][4].defender_id == "bi_ngo", "Col 0 has Thần Đèn and Col 4 has Bí Ngô frontline")
 	_assert(showcase._grid_defenders[2][2].defender_id == "chua_lanh" and showcase._grid_defenders[0][3].defender_id == "nam_doc", "Col 2 has Chữa Lành center and Col 3 has Nấm Độc")
-	_assert(showcase._count_active_enemies() == 5, "Showcase formation spawns 5 opening Yokai across all 5 lanes")
+	_assert(showcase._count_active_enemies() == 0, "Showcase formation leaves the battlefield clear during preparation")
+
+	# Simulate a long frame at accelerated speed. Hit the nearest Yokai even
+	# when it was spawned after the farther one and the projectile crosses both.
+	var far_target = showcase.spawn_enemy("tieu_yeu", 0, 690.0)
+	var near_target = showcase.spawn_enemy("tieu_yeu", 0, 590.0)
+	var dart = showcase.spawn_projectile(Vector2(510, near_target.position.y), 0, "dart", 25.0)
+	dart._process(0.45)
+	_assert(near_target.hp < near_target.max_hp and is_equal_approx(far_target.hp, far_target.max_hp), "Fast projectile hits the first crossed enemy")
+	var stun_target = showcase.spawn_enemy("oni_nho", 1, 620.0)
+	stun_target._process_walk(0.25, 1.0, 13.5)
+	_assert(stun_target._sprite.frame == 3 and is_equal_approx(stun_target.position.y, game_data.cell_to_world(1, 0).y), "Yokai walk advances every elapsed frame and remains on its lane")
+	stun_target._blocking_defender = showcase._grid_defenders[1][4]
+	var hp_before_strike: float = stun_target._blocking_defender.hp
+	stun_target._process_melee_attack(0.52, 13.5)
+	_assert(stun_target._sprite.frame == 7 and is_equal_approx(stun_target._blocking_defender.hp, hp_before_strike - stun_target.damage),
+		"Yokai melee preserves one strike when a long frame crosses the impact pose")
+	stun_target.apply_stun(1.0)
+	stun_target._process(0.15)
+	_assert(stun_target._stun_sprite.frame == 2, "Stun animation advances with simulation time")
+	showcase.on_enemy_killed(far_target)
+	far_target.free()
+	showcase.on_enemy_killed(near_target)
+	near_target.free()
+	showcase.on_enemy_killed(stun_target)
+	stun_target.free()
+
+	# Finished effects can switch texture, sheet dimensions and motion on reuse.
+	var flash_path := "res://assets/sprites/fx/fx_hit_spark.png"
+	var flash = showcase.spawn_vfx(flash_path, Vector2i(4, 3), Vector2(880, 360))
+	_assert(showcase.spawn_vfx(flash_path, Vector2i(4, 3), Vector2(890, 360)) == flash, "Nearby active hit flashes share a cue")
+	var sprite: Sprite2D = flash._sprite
+	flash._process(1.0)
+	_assert(is_instance_valid(flash) and not flash.visible and not flash.is_processing(), "Finished effects are hidden and stop processing")
+	var replacement = showcase.spawn_vfx("res://assets/sprites/defenders/phao_hoa_explode.png", Vector2i(4, 4), Vector2(975, 360), 20.0, 1.0, 0.8, Vector2(20, 0))
+	_assert(replacement == flash and replacement._sprite == sprite and sprite.frame == 0 and sprite.vframes == 4, "Reuse resets the animation and keeps the sprite")
+	_assert(replacement.z_index < showcase._grid_defenders[1][4].z_index,
+		"Reused blast renders under unit bodies even when it replaces a foreground spark")
+	replacement._process(0.25)
+	_assert(is_equal_approx(replacement.position.x, 980.0) and sprite.frame == 5, "Reused effects use the new velocity and timing")
+	replacement._process(0.6)
+	_assert(not replacement.visible, "Reused loop expires at its new configured duration")
+	var burst: Array[VfxEffect] = []
+	for i in range(40):
+		burst.append(showcase.spawn_vfx("res://assets/sprites/fx/fx_smoke_puff.png", Vector2i(4, 3), Vector2(200 + i * 16, 400)))
+	for effect in burst:
+		effect._process(1.0)
+	_assert(showcase._idle_vfx.size() == showcase.VFX_POOL_LIMIT, "VFX pool retains only its configured limit after a large burst")
 
 	# Verify final wave's _spawn_queue drains when _wave_index == waves.size()
 	showcase._wave_index = showcase.level_cfg["waves"].size()
@@ -338,8 +473,18 @@ func _run_all_tests() -> void:
 	showcase._spawn_stagger_timer = 0.0
 	showcase._process_waves(0.1)
 	showcase._process_waves(0.7)
-	_assert(showcase._spawn_queue.is_empty() and showcase._count_active_enemies() == 7, "Final wave _spawn_queue drains completely when _wave_index == waves.size()")
+	_assert(showcase._spawn_queue.is_empty() and showcase._count_active_enemies() == 2, "Final wave _spawn_queue drains completely when _wave_index == waves.size()")
 	showcase.queue_free()
+	await process_frame
+
+	game_data.selected_level = game_data.LEVELS.size()
+	var finale := battle_scene.instantiate()
+	root.add_child(finale)
+	await process_frame
+	finale._trigger_victory()
+	_assert(finale._modal_btn_primary_lbl.text == "CHƠI LẠI" and not finale._modal_btn_secondary.visible,
+		"Final chapter victory offers a single replay action")
+	finale.queue_free()
 	await process_frame
 
 	if _failures.is_empty():

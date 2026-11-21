@@ -3,6 +3,12 @@ class_name Enemy
 
 ## Yokai enemy controller supporting all 10 unique Yokai behaviors.
 
+const BODY_ATLAS := preload("res://scripts/entities/body_atlas.gd")
+const FLIGHT_HEIGHT := 18.0
+# Foot row of the opaque body in each Tengu frame. Flight art includes its own lift.
+const TENGU_FLY_CONTACT := [106, 106, 103, 109, 108, 104, 103, 103, 104, 105, 108, 104]
+const TENGU_ATTACK_CONTACT := [104, 103, 104, 110, 107, 103, 102, 102, 100, 102, 103, 104]
+const TENGU_DEATH_CONTACT := 105.0
 const BADGE_ARMOR := preload("res://assets/sprites/ui/badge_armor.png")
 const BADGE_POISON := preload("res://assets/sprites/ui/badge_poison.png")
 const BADGE_SLOW := preload("res://assets/sprites/ui/badge_slow.png")
@@ -23,6 +29,7 @@ var is_flying: bool = false
 var is_boss: bool = false
 
 var stun_timer: float = 0.0
+var _stun_anim_time: float = 0.0
 var slow_timer: float = 0.0
 var slow_ratio: float = 0.0
 var poison_timer: float = 0.0
@@ -37,6 +44,7 @@ var _battle: Node = null
 var _data: Dictionary = {}
 var _sprite: Sprite2D
 var _stun_sprite: Sprite2D
+var _status_display: Node2D
 var _move_tex: Texture2D
 var _attack_tex: Texture2D
 var _die_tex: Texture2D
@@ -82,14 +90,20 @@ func setup(battle_ref: Node, p_id: String, p_lane: int, spawn_pos: Vector2) -> v
 	_grid = _data["grid"]
 
 	_sprite = Sprite2D.new()
-	_sprite.texture = _move_tex
-	_sprite.hframes = _grid.x
-	_sprite.vframes = _grid.y
-	_sprite.frame = 0
+	BODY_ATLAS.set_sheet(_sprite, _move_tex, _grid)
 	var sc := 0.80 if is_boss else 0.76
 	_sprite.scale = Vector2(sc, sc)
-	_sprite.offset = Vector2(0.0, -30.0 if is_boss else -10.0)
+	_sprite.position.y = GameData.LANE_CONTACT_OFFSET - (FLIGHT_HEIGHT if is_flying else 0.0)
 	add_child(_sprite)
+
+	_status_display = Node2D.new()
+	_status_display.z_as_relative = false
+	_status_display.z_index = 100
+	_status_display.position.y = -23.0 if is_boss else -11.0
+	_status_display.draw.connect(_draw_status)
+	add_child(_status_display)
+	if is_flying:
+		_update_flying_status_position()
 
 	_stun_sprite = Sprite2D.new()
 	_stun_sprite.texture = load("res://assets/sprites/fx/fx_stun_stars.png") as Texture2D
@@ -99,7 +113,7 @@ func setup(battle_ref: Node, p_id: String, p_lane: int, spawn_pos: Vector2) -> v
 	_stun_sprite.scale = Vector2(0.55, 0.55)
 	_stun_sprite.position = Vector2(0.0, -64.0 if is_boss else -42.0)
 	_stun_sprite.visible = false
-	add_child(_stun_sprite)
+	_status_display.add_child(_stun_sprite)
 
 	_skill_timer = randf_range(2.5, 4.5)
 
@@ -125,7 +139,7 @@ func take_damage(amount: float, armor_piercing: bool = false) -> void:
 
 	hp -= eff
 	_hit_flash = 0.12
-	queue_redraw()
+	_status_display.queue_redraw()
 	if hp <= 0.0:
 		hp = 0.0
 		_start_die()
@@ -138,12 +152,15 @@ func apply_slow(ratio: float, duration: float) -> void:
 	slow_ratio = maxf(slow_ratio, ratio)
 	slow_timer = maxf(slow_timer, duration)
 	if not had:
-		queue_redraw()
+		_status_display.queue_redraw()
 
 
 func apply_stun(duration: float) -> void:
 	if is_dying():
 		return
+	if stun_timer <= 0.0:
+		_stun_anim_time = 0.0
+		_stun_sprite.frame = 0
 	stun_timer = maxf(stun_timer, duration)
 	if _stun_sprite:
 		_stun_sprite.visible = true
@@ -156,7 +173,7 @@ func apply_poison(dps: float, duration: float) -> void:
 	poison_dps = maxf(poison_dps, dps)
 	poison_timer = maxf(poison_timer, duration)
 	if not had:
-		queue_redraw()
+		_status_display.queue_redraw()
 
 
 func knockback(pixels: float) -> void:
@@ -176,23 +193,23 @@ func ground_from_wind() -> void:
 	if _state == "vault":
 		_state = "walk"
 	if _sprite:
-		_sprite.position.y = 0.0
-	queue_redraw()
+		_sprite.position.y = GameData.LANE_CONTACT_OFFSET
+		_set_body_frame(_frame_idx)
+	_status_display.position.y = -11.0
+	_status_display.queue_redraw()
 
 
 func _start_die() -> void:
 	_state = "die"
+	_status_display.hide()
+	queue_redraw()
 	_kb_remaining = 0.0
-	_frame_accum = 0.0
-	_frame_idx = 0
-	if _sprite:
-		_sprite.rotation = 0.0
+	_sprite.rotation = 0.0
 	if _stun_sprite:
 		_stun_sprite.visible = false
-	_sprite.texture = _die_tex
-	_sprite.hframes = _grid.x
-	_sprite.vframes = _grid.y
-	_sprite.frame = 0
+	_set_anim(_die_tex)
+	if enemy_id == "tengu" and is_flying:
+		create_tween().tween_property(_sprite, "position:y", GameData.LANE_CONTACT_OFFSET, 0.28).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
 	AudioManager.play_sfx("enemy_die", -7.0)
 	if _battle:
 		_battle.on_enemy_killed(self)
@@ -200,34 +217,49 @@ func _start_die() -> void:
 
 func _set_anim(tex: Texture2D) -> void:
 	if _sprite.texture != tex:
-		_sprite.texture = tex
-		_sprite.hframes = _grid.x
-		_sprite.vframes = _grid.y
+		BODY_ATLAS.set_sheet(_sprite, tex, _grid)
 		_frame_idx = 0
 		_frame_accum = 0.0
-		_sprite.frame = 0
+		_set_body_frame(0)
+
+
+func _set_body_frame(frame: int) -> void:
+	_sprite.frame = frame
+	if enemy_id != "tengu":
+		return
+	if is_dying():
+		BODY_ATLAS.set_contact_pixel(_sprite, TENGU_DEATH_CONTACT)
+	elif not is_flying:
+		var contacts := TENGU_ATTACK_CONTACT if _sprite.texture == _attack_tex else TENGU_FLY_CONTACT
+		BODY_ATLAS.set_contact_pixel(_sprite, contacts[frame])
+
+
+func _update_flying_status_position() -> void:
+	_status_display.position.y = _sprite.position.y - GameData.LANE_CONTACT_OFFSET - 24.0
 
 
 func _draw() -> void:
 	if is_dying():
 		return
 	# Shadow
-	draw_set_transform(Vector2(0.0, 30.0), 0.0, Vector2(1.0, 0.34))
+	draw_set_transform(Vector2(0.0, GameData.LANE_CONTACT_OFFSET), 0.0, Vector2(1.0, 0.34))
 	draw_circle(Vector2.ZERO, 34.0 if is_boss else 25.0, Color(0.0, 0.0, 0.0, 0.26))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
+
+func _draw_status() -> void:
 	# HP bar (shown when damaged or boss)
 	var bar_w := 76.0 if is_boss else 52.0
 	var bar_y := -66.0 if is_boss else -43.0
 	if hp < max_hp or is_boss:
 		var ratio := clampf(hp / max_hp, 0.0, 1.0)
-		draw_rect(Rect2(Vector2(-bar_w * 0.5, bar_y), Vector2(bar_w, 6.0)), Color(0.08, 0.06, 0.06, 0.82))
-		draw_rect(Rect2(Vector2(-bar_w * 0.5 + 1, bar_y + 1), Vector2((bar_w - 2.0) * ratio, 4.0)), Color(0.92, 0.24, 0.24))
+		_status_display.draw_rect(Rect2(Vector2(-bar_w * 0.5, bar_y), Vector2(bar_w, 6.0)), Color(0.08, 0.06, 0.06, 0.82))
+		_status_display.draw_rect(Rect2(Vector2(-bar_w * 0.5 + 1, bar_y + 1), Vector2((bar_w - 2.0) * ratio, 4.0)), Color(0.92, 0.24, 0.24))
 
 	if max_armor_hp > 0.0 and armor_hp > 0.0:
 		var ar := clampf(armor_hp / max_armor_hp, 0.0, 1.0)
-		draw_rect(Rect2(Vector2(-bar_w * 0.5, bar_y - 7.0), Vector2(bar_w, 5.0)), Color(0.08, 0.06, 0.06, 0.82))
-		draw_rect(Rect2(Vector2(-bar_w * 0.5 + 1, bar_y - 6.0), Vector2((bar_w - 2.0) * ar, 3.0)), Color(0.96, 0.80, 0.22))
+		_status_display.draw_rect(Rect2(Vector2(-bar_w * 0.5, bar_y - 7.0), Vector2(bar_w, 5.0)), Color(0.08, 0.06, 0.06, 0.82))
+		_status_display.draw_rect(Rect2(Vector2(-bar_w * 0.5 + 1, bar_y - 6.0), Vector2((bar_w - 2.0) * ar, 3.0)), Color(0.96, 0.80, 0.22))
 
 	# Compact overhead combat status badges
 	var badges: Array[Texture2D] = []
@@ -248,7 +280,7 @@ func _draw() -> void:
 		var start_x := -total_w * 0.5
 		var badge_y := bar_y - (26.0 if armor_hp > 0.0 else 20.0)
 		for i in range(badges.size()):
-			draw_texture_rect(badges[i], Rect2(start_x + i * (icon_sz + gap), badge_y, icon_sz, icon_sz), false)
+			_status_display.draw_texture_rect(badges[i], Rect2(start_x + i * (icon_sz + gap), badge_y, icon_sz, icon_sz), false)
 
 
 func _process(delta: float) -> void:
@@ -270,7 +302,7 @@ func _process(delta: float) -> void:
 	if poison_timer > 0.0:
 		poison_timer = maxf(0.0, poison_timer - delta)
 		if poison_timer == 0.0:
-			queue_redraw()
+			_status_display.queue_redraw()
 		take_damage(poison_dps * delta, true)
 		if is_dying():
 			return
@@ -282,7 +314,7 @@ func _process(delta: float) -> void:
 		slow_timer = maxf(0.0, slow_timer - delta)
 		if slow_timer == 0.0:
 			slow_ratio = 0.0
-			queue_redraw()
+			_status_display.queue_redraw()
 
 	if _sprite:
 		if _hit_flash > 0.0:
@@ -298,8 +330,8 @@ func _process(delta: float) -> void:
 		stun_timer = maxf(0.0, stun_timer - delta)
 		if _stun_sprite:
 			_stun_sprite.visible = stun_timer > 0.0
-			var sf := int(Time.get_ticks_msec() / 70.0) % 12
-			_stun_sprite.frame = sf
+			_stun_anim_time += delta
+			_stun_sprite.frame = int(_stun_anim_time / 0.07) % 12
 	elif _stun_sprite and _stun_sprite.visible:
 		_stun_sprite.visible = false
 
@@ -385,14 +417,15 @@ func _process_walk(delta: float, speed_mult: float, anim_fps: float) -> void:
 	position.x -= move_spd * delta
 
 	if _sprite and is_flying:
-		_sprite.position.y = -18.0 + sin(position.x * 0.06) * 5.0
+		_sprite.position.y = GameData.LANE_CONTACT_OFFSET - FLIGHT_HEIGHT + sin(position.x * 0.06) * 5.0
+		_update_flying_status_position()
 
 	var total := _grid.x * _grid.y
 	_frame_accum += delta * anim_fps
-	if _frame_accum >= 1.0:
+	while _frame_accum >= 1.0:
 		_frame_accum -= 1.0
 		_frame_idx = (_frame_idx + 1) % total
-		_sprite.frame = _frame_idx
+		_set_body_frame(_frame_idx)
 
 	if _battle:
 		# Trigger Komainu last line guardian or lose condition
@@ -406,15 +439,18 @@ func _process_melee_attack(delta: float, anim_fps: float) -> void:
 	var total := _grid.x * _grid.y
 	_attack_timer += delta * (1.0 - slow_ratio)
 	_frame_accum += delta * anim_fps
-	if _frame_accum >= 1.0:
+	var impact_frame := int(total * 0.45)
+	var crossed_impact := false
+	while _frame_accum >= 1.0:
 		_frame_accum -= 1.0
 		_frame_idx += 1
 		if _frame_idx >= total:
 			_frame_idx = 0
 			_attack_hit_done = false
-		_sprite.frame = _frame_idx
+		crossed_impact = crossed_impact or _frame_idx == impact_frame
+		_set_body_frame(_frame_idx)
 
-	if not _attack_hit_done and _frame_idx >= int(total * 0.45):
+	if not _attack_hit_done and (crossed_impact or _frame_idx >= impact_frame):
 		_attack_hit_done = true
 		_deal_melee_hit()
 	elif _attack_timer >= attack_interval:
@@ -453,17 +489,19 @@ func _process_vault(delta: float) -> void:
 	var t := clampf(_vault_elapsed / 0.55, 0.0, 1.0)
 	position.x = lerpf(_vault_start_x, _vault_end_x, t)
 	if _sprite:
-		_sprite.position.y = -18.0 - sin(t * PI) * 44.0
+		_sprite.position.y = GameData.LANE_CONTACT_OFFSET - FLIGHT_HEIGHT - sin(t * PI) * 44.0
+		_update_flying_status_position()
 	var total := _grid.x * _grid.y
 	_frame_accum += delta * 16.0
-	if _frame_accum >= 1.0:
+	while _frame_accum >= 1.0:
 		_frame_accum -= 1.0
 		_frame_idx = (_frame_idx + 1) % total
-		_sprite.frame = _frame_idx
+		_set_body_frame(_frame_idx)
 	if t >= 1.0:
 		_state = "walk"
 		if _sprite:
-			_sprite.position.y = -18.0 if is_flying else 0.0
+			_sprite.position.y = GameData.LANE_CONTACT_OFFSET - (FLIGHT_HEIGHT if is_flying else 0.0)
+			_update_flying_status_position()
 
 
 func _switch_adjacent_lane() -> bool:
@@ -479,7 +517,7 @@ func _switch_adjacent_lane() -> bool:
 	var old_lane := lane
 	lane = target_lane
 	z_index = 21 + lane * 2
-	var target_y := GameData.GRID_ORIGIN.y + (lane + 0.5) * GameData.CELL_SIZE.y
+	var target_y := GameData.cell_to_world(lane, 0).y
 	var tw := create_tween()
 	tw.tween_property(self, "position:y", target_y, 0.38).set_trans(Tween.TRANS_SINE)
 	if _battle:
@@ -545,7 +583,7 @@ func _execute_special_skill() -> void:
 		_battle.spawn_vfx("res://assets/sprites/fx/fx_miko_summon_circle.png", Vector2i(4, 3), position + Vector2(0, 12), 18.0, 0.92)
 		var lanes := [clampi(lane - 1, 0, GameData.GRID_ROWS - 1), clampi(lane + 1, 0, GameData.GRID_ROWS - 1)]
 		for target_lane in lanes:
-			var spawn_pos := Vector2(clampf(position.x + 22.0, 260.0, 1140.0), GameData.GRID_ORIGIN.y + (target_lane + 0.5) * GameData.CELL_SIZE.y)
+			var spawn_pos := Vector2(clampf(position.x + 22.0, 260.0, 1140.0), GameData.cell_to_world(target_lane, 0).y)
 			_battle.spawn_vfx("res://assets/sprites/fx/fx_smoke_puff.png", Vector2i(4, 3), spawn_pos + Vector2(0, -8), 18.0, 0.72)
 			_battle.spawn_enemy("tieu_yeu", target_lane, spawn_pos.x)
 	elif enemy_id == "yuki_onna":

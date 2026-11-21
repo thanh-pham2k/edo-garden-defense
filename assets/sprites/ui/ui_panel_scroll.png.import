@@ -15,9 +15,9 @@ dest_files=["res://.godot/imported/ui_panel_scroll.png-def8dad5a9bac6ab16be5a7c8
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.84
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

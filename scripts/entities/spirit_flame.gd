@@ -10,7 +10,6 @@ var collected: bool = false
 var _battle: Node = null
 var _sprite: Sprite2D
 var _target_ground_pos: Vector2 = Vector2.ZERO
-var _hud_pos: Vector2 = Vector2(100.0, 48.0)
 var _frame_accum: float = 0.0
 var _frame_idx: int = 0
 var _age: float = 0.0
@@ -25,7 +24,6 @@ func setup(
 	battle_ref: Node,
 	start_pos: Vector2,
 	ground_pos: Vector2,
-	hud_target: Vector2,
 	p_amount: int = 25,
 	sky_drop: bool = false
 ) -> void:
@@ -33,7 +31,6 @@ func setup(
 	position = start_pos
 	_pop_start = start_pos
 	_target_ground_pos = ground_pos
-	_hud_pos = hud_target
 	amount = p_amount
 	_is_sky_drop = sky_drop
 	z_index = 95
@@ -56,11 +53,13 @@ func collect() -> void:
 		return
 	collected = true
 	AudioManager.play_sfx("collect_flame", -6.0)
-	if _battle:
+	var hud_target := position
+	if is_instance_valid(_battle):
 		_battle.add_flame(amount)
+		hud_target = _battle.get_flame_hud_target()
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(self, "position", _hud_pos, 0.36).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(self, "position", hud_target, 0.36).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_property(self, "scale", Vector2(0.45, 0.45), 0.36)
 	tw.tween_property(self, "modulate:a", 0.25, 0.36)
 	tw.chain().tween_callback(queue_free)
@@ -69,8 +68,9 @@ func collect() -> void:
 func _process(delta: float) -> void:
 	_frame_accum += delta * 11.0
 	if _frame_accum >= 1.0:
-		_frame_accum -= 1.0
-		_frame_idx = (_frame_idx + 1) % 6
+		var elapsed_frames := int(_frame_accum)
+		_frame_accum -= float(elapsed_frames)
+		_frame_idx = (_frame_idx + elapsed_frames) % 6
 		if _sprite:
 			_sprite.frame = _frame_idx
 

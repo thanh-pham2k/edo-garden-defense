@@ -4,7 +4,7 @@ class_name SeedCard
 ## Interactive defender seed card supporting Tap-Select, Drag-and-Drop, and Cooldown visuals.
 
 signal card_pressed(defender_id: String, index: int)
-signal card_drag_started(defender_id: String, index: int, global_pos: Vector2)
+signal card_drag_started(defender_id: String, index: int, viewport_pos: Vector2)
 
 var defender_id: String = ""
 var card_index: int = 0
@@ -37,8 +37,9 @@ func setup(p_id: String, p_idx: int) -> void:
 	cooldown_total = float(data["cooldown"]) * GameData.get_cooldown_mult()
 	cooldown_left = 0.0
 
-	custom_minimum_size = Vector2(74.0, 92.0)
-	size = Vector2(74.0, 92.0)
+	custom_minimum_size = Vector2(84.0, 106.0)
+	size = custom_minimum_size
+	pivot_offset = size * 0.5
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	tooltip_text = "%s (%d) — %s" % [data["name"], cost, data["desc"]]
 
@@ -55,8 +56,8 @@ func setup(p_id: String, p_idx: int) -> void:
 	add_child(_bg_rect)
 
 	_icon_rect = TextureRect.new()
-	_icon_rect.position = Vector2(12.0, 17.0)
-	_icon_rect.size = Vector2(50.0, 48.0)
+	_icon_rect.position = Vector2(14.0, 20.0)
+	_icon_rect.size = Vector2(56.0, 56.0)
 	_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -65,8 +66,8 @@ func setup(p_id: String, p_idx: int) -> void:
 
 	_cooldown_mask = ColorRect.new()
 	_cooldown_mask.color = Color(0.05, 0.04, 0.08, 0.62)
-	_cooldown_mask.position = Vector2(7.0, 10.0)
-	_cooldown_mask.size = Vector2(60.0, 0.0)
+	_cooldown_mask.position = Vector2(8.0, 11.0)
+	_cooldown_mask.size = Vector2(68.0, 0.0)
 	_cooldown_mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_cooldown_mask.visible = false
 	add_child(_cooldown_mask)
@@ -75,18 +76,18 @@ func setup(p_id: String, p_idx: int) -> void:
 	_cost_label.text = str(cost)
 	_cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_cost_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_cost_label.position = Vector2(12.0, 71.0)
-	_cost_label.size = Vector2(50.0, 18.0)
-	_cost_label.add_theme_font_size_override("font_size", 13)
+	_cost_label.position = Vector2(14.0, 82.0)
+	_cost_label.size = Vector2(56.0, 20.0)
+	_cost_label.add_theme_font_size_override("font_size", 15)
 	_cost_label.add_theme_color_override("font_color", Color(0.24, 0.12, 0.04))
 	_cost_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_cost_label)
 
 	_hotkey_label = Label.new()
 	_hotkey_label.text = str(card_index + 1)
-	_hotkey_label.position = Vector2(8.0, 8.0)
+	_hotkey_label.position = Vector2(9.0, 9.0)
 	_hotkey_label.size = Vector2(18.0, 16.0)
-	_hotkey_label.add_theme_font_size_override("font_size", 10)
+	_hotkey_label.add_theme_font_size_override("font_size", 11)
 	_hotkey_label.add_theme_color_override("font_color", Color(0.38, 0.22, 0.08, 0.85))
 	_hotkey_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_hotkey_label)
@@ -135,7 +136,7 @@ func _refresh_visual() -> void:
 	if cooldown_left > 0.0:
 		var ratio := clampf(cooldown_left / maxf(0.1, cooldown_total), 0.0, 1.0)
 		_cooldown_mask.visible = true
-		_cooldown_mask.size = Vector2(60.0, 66.0 * ratio)
+		_cooldown_mask.size = Vector2(68.0, 76.0 * ratio)
 	else:
 		_cooldown_mask.visible = false
 
@@ -154,4 +155,5 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and _pointer_down and not _drag_triggered:
 		if event.global_position.distance_to(_press_pos) >= 10.0:
 			_drag_triggered = true
-			card_drag_started.emit(defender_id, card_index, event.global_position)
+			var viewport_pos: Vector2 = get_global_transform_with_canvas() * event.position
+			card_drag_started.emit(defender_id, card_index, viewport_pos)

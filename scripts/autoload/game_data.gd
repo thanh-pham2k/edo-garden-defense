@@ -6,7 +6,10 @@ extends Node
 const GRID_ROWS := 5
 const GRID_COLS := 9
 const CELL_SIZE := Vector2(96.0, 92.0)
+const LANTERN_FLAME_BONUS := 5
 const GRID_ORIGIN := Vector2(228.0, 174.0)
+# The contact line sits below the geometric lane center in the angled artwork.
+const LANE_CONTACT_OFFSET := 24.0
 const SAVE_PATH := "user://edo_save.json"
 const MAX_DECK_SIZE := 8
 
@@ -21,6 +24,7 @@ var jade_gems: int = 15
 var unlocked_upgrades: Array[String] = []
 var auto_collect_flame: bool = true
 var sound_muted: bool = false
+var audio_layers := {"music": true, "ambience": true, "sfx": true}
 
 # Runtime 5x speed & 10-minute auto-play state
 var game_speed_multiplier: float = 1.0
@@ -165,11 +169,12 @@ const DEFENDERS: Dictionary = {
 		"id": "than_den",
 		"name": "Thần Đèn",
 		"role": "Tạo Linh Hỏa",
-		"desc": "Phát sáng tạo +25 Linh Hỏa mỗi 10.5 giây.",
+		"desc": "Tạo 30 Linh Hỏa sau khoảng 2 giây khi đặt, rồi mỗi khoảng 9 giây.",
 		"cost": 50,
 		"cooldown": 6.5,
 		"hp": 260.0,
-		"attack_interval": 10.5,
+		"attack_interval": 8.0,
+		"first_action_delay": 1.7,
 		"damage": 0.0,
 		"idle_sheet": "res://assets/sprites/defenders/than_den_idle.png",
 		"idle_grid": Vector2i(3, 2),
@@ -524,10 +529,13 @@ const LEVELS: Array[Dictionary] = [
 		"name": "Chương 1: Sân Vườn Làng Hoa",
 		"subtitle": "Ban ngày — Bảo vệ nhà cổ khỏi Tiểu Yêu & Oni Nhỏ",
 		"bg_stem": "bg_ch1_sakura_village",
+		"land_tone": Vector2(0.72, 0.69),
+		"terrain_variants": Vector2i(5, 4),
+		"terrain_tint": Color(0.47, 0.58, 0.32),
 		"top_border": "res://assets/sprites/environments/env_border_top_ch1.png",
 		"lawn_edge": "res://assets/sprites/environments/env_edge_bamboo_flowers.png",
 		"house_tex": "res://assets/sprites/props/prop_edo_house.png",
-		"gate_tex": "res://assets/sprites/props/prop_torii.png",
+		"gate_tex": "res://assets/sprites/environments/gate_ch1_sakura_torii.png",
 		"biome_flora": [
 			"res://assets/sprites/environments/flora_sakura_hedge.png",
 			"res://assets/sprites/props/prop_sakura_tree.png",
@@ -542,7 +550,7 @@ const LEVELS: Array[Dictionary] = [
 		"ground_tint": Color(0.45, 0.63, 0.34, 1),
 		"ambient_particle": "res://assets/sprites/fx/part_sakura_1.png",
 		"natural_flame_interval": 8.0,
-		"starting_flame": 150,
+		"starting_flame": 175,
 		"obstacles": [],
 		"props": [
 			"res://assets/sprites/props/prop_sakura_tree.png",
@@ -550,8 +558,8 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/props/prop_flower_bush.png",
 		],
 		"waves": [
-			{"delay": 3.5, "huge": false, "spawns": ["tieu_yeu", "tieu_yeu"]},
-			{"delay": 10.0, "huge": false, "spawns": ["tieu_yeu", "tieu_yeu", "nekomata"]},
+			{"delay": 30.0, "huge": false, "spawns": ["tieu_yeu"]},
+			{"delay": 12.0, "huge": false, "spawns": ["tieu_yeu", "nekomata"]},
 			{"delay": 11.0, "huge": false, "spawns": ["tieu_yeu", "oni_nho", "tieu_yeu"]},
 			{"delay": 12.0, "huge": false, "spawns": ["nekomata", "oni_nho", "tieu_yeu", "tieu_yeu"]},
 			{"delay": 13.0, "huge": false, "spawns": ["oni_nho", "kappa", "nekomata", "tieu_yeu"]},
@@ -563,10 +571,14 @@ const LEVELS: Array[Dictionary] = [
 		"name": "Chương 2: Rừng Tre Hoàng Hôn",
 		"subtitle": "Hoàng hôn — Vật cản rào gỗ, Tengu bay & Nekomata",
 		"bg_stem": "bg_ch2_bamboo_sunset",
+		"land_tone": Vector2(0.63, 0.58),
+		"terrain_variants": Vector2i(3, 1),
+		"terrain_tint": Color(0.46, 0.48, 0.34),
 		"top_border": "res://assets/sprites/environments/env_border_top_ch2.png",
 		"lawn_edge": "res://assets/sprites/environments/env_edge_moss_stones.png",
 		"house_tex": "res://assets/sprites/environments/house_ch2_teahouse.png",
 		"gate_tex": "res://assets/sprites/environments/gate_ch2_bamboo.png",
+		"stone_path_tex": "res://assets/sprites/environments/env_path_stones_sunset.png",
 		"biome_flora": [
 			"res://assets/sprites/environments/flora_sunset_bamboo.png",
 			"res://assets/sprites/environments/flora_moss_lantern_cluster.png",
@@ -581,7 +593,7 @@ const LEVELS: Array[Dictionary] = [
 		"ground_tint": Color(0.36, 0.44, 0.32, 1),
 		"ambient_particle": "res://assets/sprites/fx/part_bamboo_leaf.png",
 		"natural_flame_interval": 9.0,
-		"starting_flame": 150,
+		"starting_flame": 200,
 		"obstacles": [
 			{"id": "obs_wood_fence", "row": 1, "col": 5},
 			{"id": "obs_rock", "row": 2, "col": 6},
@@ -594,7 +606,7 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/props/prop_signpost.png",
 		],
 		"waves": [
-			{"delay": 3.5, "huge": false, "spawns": ["tieu_yeu", "nekomata"]},
+			{"delay": 28.0, "huge": false, "spawns": ["tieu_yeu", "nekomata"]},
 			{"delay": 9.5, "huge": false, "spawns": ["tieu_yeu", "tengu", "tieu_yeu"]},
 			{"delay": 10.5, "huge": false, "spawns": ["oni_nho", "tengu", "nekomata"]},
 			{"delay": 11.5, "huge": false, "spawns": ["kappa", "tengu", "oni_nho", "tieu_yeu"]},
@@ -608,6 +620,9 @@ const LEVELS: Array[Dictionary] = [
 		"name": "Chương 3: Hồ Cá Koi Đền Thần",
 		"subtitle": "Ban đêm — Làn nước Hồ Koi, Rào gai & Miko Ma",
 		"bg_stem": "bg_ch3_koi_shrine_night",
+		"land_tone": Vector2(0.63, 0.59),
+		"terrain_variants": Vector2i(3, 2),
+		"terrain_tint": Color(0.36, 0.37, 0.32),
 		"top_border": "res://assets/sprites/environments/env_border_top_ch3.png",
 		"lawn_edge": "res://assets/sprites/environments/env_edge_koi_bank.png",
 		"house_tex": "res://assets/sprites/environments/house_ch3_koi_shrine.png",
@@ -618,15 +633,15 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/props/prop_red_bridge.png",
 		],
 		"atmosphere_style": "night",
-		"tile_primary": "tile_sakura",
-		"tile_alt": "tile_moss_stone",
+		"tile_primary": "tile_moss_stone",
+		"tile_alt": "tile_sakura",
 		"water_lane": 2,
 		"sky_top": Color(0.11, 0.14, 0.30, 1),
 		"sky_bottom": Color(0.22, 0.31, 0.48, 1),
 		"ground_tint": Color(0.24, 0.28, 0.38, 1),
 		"ambient_particle": "res://assets/sprites/fx/part_spirit_wisp.png",
 		"natural_flame_interval": 10.0,
-		"starting_flame": 175,
+		"starting_flame": 200,
 		"obstacles": [
 			{"id": "obs_spike_barricade", "row": 0, "col": 5},
 			{"id": "obs_rock", "row": 1, "col": 6},
@@ -639,7 +654,7 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/props/prop_hanging_lantern.png",
 		],
 		"waves": [
-			{"delay": 3.5, "huge": false, "spawns": ["tieu_yeu", "kappa"]},
+			{"delay": 28.0, "huge": false, "spawns": ["tieu_yeu", "kappa"]},
 			{"delay": 9.5, "huge": false, "spawns": ["kappa", "kappa", "tieu_yeu"]},
 			{"delay": 10.5, "huge": false, "spawns": ["miko_ma", "tieu_yeu", "kappa"]},
 			{"delay": 11.0, "huge": false, "spawns": ["tengu", "kappa", "nekomata", "miko_ma"]},
@@ -654,10 +669,15 @@ const LEVELS: Array[Dictionary] = [
 		"name": "Chương 4: Thành Cổ Sương Mù",
 		"subtitle": "Đêm sương — Thùng Sake nổ, Samurai Ma & Rắn Ống",
 		"bg_stem": "bg_ch4_misty_castle",
+		"land_tone": Vector2(0.71, 0.64),
+		"terrain_variants": Vector2i(5, 1),
+		"terrain_tint": Color(0.41, 0.40, 0.42),
 		"top_border": "res://assets/sprites/environments/env_border_top_ch4.png",
 		"lawn_edge": "res://assets/sprites/environments/env_edge_moss_stones.png",
 		"house_tex": "res://assets/sprites/environments/house_ch4_castle_guard.png",
 		"gate_tex": "res://assets/sprites/environments/gate_ch4_castle_gate.png",
+		"stone_path_tex": "res://assets/sprites/environments/env_path_stones_sunset.png",
+		"biome_flora_widths": Vector3(90, 91, 47),
 		"biome_flora": [
 			"res://assets/sprites/environments/flora_autumn_maple.png",
 			"res://assets/sprites/environments/flora_moss_lantern_cluster.png",
@@ -672,7 +692,7 @@ const LEVELS: Array[Dictionary] = [
 		"ground_tint": Color(0.24, 0.24, 0.30, 1),
 		"ambient_particle": "res://assets/sprites/fx/part_sakura_2.png",
 		"natural_flame_interval": 10.0,
-		"starting_flame": 175,
+		"starting_flame": 225,
 		"obstacles": [
 			{"id": "obs_crate", "row": 0, "col": 5},
 			{"id": "obs_sake_barrel", "row": 1, "col": 6},
@@ -686,7 +706,7 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/props/prop_banner.png",
 		],
 		"waves": [
-			{"delay": 3.5, "huge": false, "spawns": ["tieu_yeu", "ran_ong"]},
+			{"delay": 26.0, "huge": false, "spawns": ["tieu_yeu", "ran_ong"]},
 			{"delay": 9.5, "spawns": ["samurai_ma", "tieu_yeu", "nekomata"], "huge": false},
 			{"delay": 10.5, "spawns": ["ran_ong", "kappa", "miko_ma"], "huge": false},
 			{"delay": 11.0, "spawns": ["samurai_ma", "tengu", "oni_nho", "ran_ong"], "huge": false},
@@ -702,14 +722,19 @@ const LEVELS: Array[Dictionary] = [
 		"name": "Chương 5: Đỉnh Núi Tuyết Trắng",
 		"subtitle": "Bão tuyết — Đống rơm, Yuki-onna & Trùm Đại Oni",
 		"bg_stem": "bg_ch5_snowy_mountain",
-		"top_border": "res://assets/sprites/environments/env_border_top_ch5.png",
+		"land_tone": Vector2(0.67, 0.61),
+		"terrain_variants": Vector2i(0, 4),
+		"terrain_tint": Color(0.57, 0.65, 0.72),
+		"top_border": "res://assets/sprites/environments/env_border_top_ch5_wide.png",
 		"lawn_edge": "res://assets/sprites/environments/env_edge_snowdrift.png",
 		"house_tex": "res://assets/sprites/environments/house_ch5_snow_shrine.png",
 		"gate_tex": "res://assets/sprites/environments/gate_ch5_snow_torii.png",
+		"stone_path_tex": "res://assets/sprites/environments/env_path_stones_winter.png",
+		"biome_flora_widths": Vector3(90, 55, 80),
 		"biome_flora": [
-			"res://assets/sprites/environments/flora_snow_pine.png",
+			"res://assets/sprites/environments/flora_snow_pine_tall.png",
 			"res://assets/sprites/props/prop_snow_bonsai.png",
-			"res://assets/sprites/environments/flora_snow_pine.png",
+			"res://assets/sprites/environments/flora_snow_lantern_rock.png",
 		],
 		"atmosphere_style": "snow",
 		"tile_primary": "tile_snow",
@@ -720,7 +745,7 @@ const LEVELS: Array[Dictionary] = [
 		"ground_tint": Color(0.55, 0.65, 0.78, 1),
 		"ambient_particle": "res://assets/sprites/fx/part_snowflake.png",
 		"natural_flame_interval": 9.5,
-		"starting_flame": 200,
+		"starting_flame": 250,
 		"obstacles": [
 			{"id": "obs_haystack", "row": 0, "col": 5},
 			{"id": "obs_rock", "row": 1, "col": 6},
@@ -734,7 +759,7 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/props/prop_hanging_lantern.png",
 		],
 		"waves": [
-			{"delay": 3.5, "huge": false, "spawns": ["tieu_yeu", "yuki_onna"]},
+			{"delay": 26.0, "huge": false, "spawns": ["tieu_yeu", "oni_nho"]},
 			{"delay": 9.5, "huge": false, "spawns": ["yuki_onna", "nekomata", "tieu_yeu"]},
 			{"delay": 10.0, "huge": false, "spawns": ["samurai_ma", "yuki_onna", "tengu"]},
 			{"delay": 10.5, "huge": false, "spawns": ["ran_ong", "yuki_onna", "kappa", "oni_nho"]},
@@ -753,7 +778,7 @@ func _ready() -> void:
 	load_progress()
 	var args := OS.get_cmdline_args()
 	var user_args := OS.get_cmdline_user_args()
-	if args.has("--autoplay-5x-10m") or user_args.has("--autoplay-5x-10m") or DisplayServer.get_name() != "headless":
+	if args.has("--autoplay-5x-10m") or user_args.has("--autoplay-5x-10m"):
 		start_auto_play(600.0, 5.0)
 
 
@@ -902,6 +927,7 @@ func save_progress() -> void:
 		"unlocked_upgrades": unlocked_upgrades,
 		"auto_collect_flame": auto_collect_flame,
 		"sound_muted": sound_muted,
+		"audio_layers": audio_layers,
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
@@ -940,3 +966,7 @@ func load_progress() -> void:
 			selected_deck = clean_deck
 	auto_collect_flame = bool(parsed.get("auto_collect_flame", true))
 	sound_muted = bool(parsed.get("sound_muted", false))
+	var saved_layers = parsed.get("audio_layers", {})
+	if saved_layers is Dictionary:
+		for layer in audio_layers:
+			audio_layers[layer] = bool(saved_layers.get(layer, true))

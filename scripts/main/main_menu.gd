@@ -2,6 +2,7 @@ extends Control
 
 ## Main Menu & Chapter / Deck Selection screen for Edo Garden Defense.
 
+const SAFE_AREA := preload("res://scripts/ui/safe_area.gd")
 const BATTLE_SCENE_PATH := "res://scenes/battle/BattleScene.tscn"
 
 var _level_buttons: Array[Button] = []
@@ -14,6 +15,7 @@ var _info_desc_label: Label
 var _auto_collect_btn: Button
 var _auto_play_btn: Button
 var _sound_btn: TextureButton
+var _audio_menu: PopupMenu
 var _bg_preview_rect: TextureRect
 var _portrait_overlay: Control
 var _particle_layer: Node2D
@@ -29,6 +31,21 @@ func _ready() -> void:
 		GameData.prepare_auto_play_loadout(GameData.selected_level)
 		_refresh_ui()
 		get_tree().create_timer(0.5, true, false, true).timeout.connect(_auto_enter_battle)
+
+
+func _update_menu_safe_area(menu: MarginContainer) -> void:
+	if not menu.is_inside_tree():
+		return
+	var insets := SAFE_AREA.viewport_insets(get_window())
+	var viewport_size := get_viewport_rect().size
+	var safe_origin := Vector2(insets.x, insets.y)
+	var safe_size := viewport_size - safe_origin - Vector2(insets.z, insets.w)
+	var menu_size := safe_size.min(Vector2(1280.0, 720.0))
+	var origin := safe_origin + (safe_size - menu_size) * 0.5
+	menu.offset_left = origin.x
+	menu.offset_top = origin.y
+	menu.offset_right = origin.x + menu_size.x - viewport_size.x
+	menu.offset_bottom = origin.y + menu_size.y - viewport_size.y
 
 
 func _build_ui() -> void:
@@ -60,12 +77,6 @@ func _build_ui() -> void:
 	_bg_preview_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_bg_preview_rect)
 
-	# Decorative Edo Props
-	_add_prop("res://assets/sprites/props/prop_sakura_tree.png", Vector2(-10, 290), Vector2(260, 260), Color(1, 1, 1, 0.92))
-	_add_prop("res://assets/sprites/props/prop_edo_house.png", Vector2(24, 430), Vector2(230, 230), Color(1, 1, 1, 0.95))
-	_add_prop("res://assets/sprites/props/prop_pagoda.png", Vector2(1050, 270), Vector2(220, 220), Color(1, 1, 1, 0.9))
-	_add_prop("res://assets/sprites/props/prop_torii.png", Vector2(1025, 430), Vector2(235, 235), Color(1, 1, 1, 0.95))
-
 	# Falling Sakura Particles
 	_particle_layer = Node2D.new()
 	add_child(_particle_layer)
@@ -88,6 +99,10 @@ func _build_ui() -> void:
 	root.add_theme_constant_override("margin_top", 14)
 	root.add_theme_constant_override("margin_bottom", 14)
 	add_child(root)
+	var update_safe_area := _update_menu_safe_area.bind(root)
+	get_viewport().size_changed.connect(update_safe_area)
+	get_window().focus_entered.connect(update_safe_area)
+	update_safe_area.call()
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
@@ -183,9 +198,17 @@ func _build_ui() -> void:
 	_sound_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_sound_btn.ignore_texture_size = true
 	_sound_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
-	_sound_btn.tooltip_text = "Bật / Tắt Âm Thanh"
-	_sound_btn.pressed.connect(_on_toggle_sound)
+	_sound_btn.tooltip_text = "Cài đặt âm thanh"
+	_sound_btn.pressed.connect(_show_audio_menu)
 	header.add_child(_sound_btn)
+	_audio_menu = PopupMenu.new()
+	_audio_menu.add_check_item("Tắt toàn bộ âm thanh", 0)
+	_audio_menu.add_separator()
+	_audio_menu.add_check_item("Nhạc nền", 1)
+	_audio_menu.add_check_item("Âm thanh thiên nhiên", 2)
+	_audio_menu.add_check_item("Hiệu ứng âm thanh", 3)
+	_audio_menu.id_pressed.connect(_on_audio_menu_selected)
+	add_child(_audio_menu)
 
 	# 4. Main Content Columns (Left: Chapters, Right: Deck Picker & Play)
 	var content := HBoxContainer.new()
@@ -335,18 +358,6 @@ func _build_ui() -> void:
 	add_child(_portrait_overlay)
 
 
-func _add_prop(path: String, pos: Vector2, sz: Vector2, tint: Color) -> void:
-	var tr := TextureRect.new()
-	tr.texture = load(path) as Texture2D
-	tr.position = pos
-	tr.size = sz
-	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	tr.modulate = tint
-	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(tr)
-
-
 func _make_washi_panel(bg_col: Color, border_col: Color) -> PanelContainer:
 	var p := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
@@ -394,7 +405,10 @@ func _create_level_row(lvl: Dictionary) -> Button:
 	row_h.add_child(node_icon)
 
 	var tile_prev := TextureRect.new()
-	tile_prev.texture = load("res://assets/sprites/tiles/%s_0.png" % lvl["tile_primary"]) as Texture2D
+	if int(lvl["water_lane"]) >= 0:
+		tile_prev.texture = preload("res://assets/sprites/tiles/tile_koi_water_2.png")
+	else:
+		tile_prev.texture = load("res://assets/sprites/tiles/%s_%d.png" % [lvl["tile_primary"], lvl["terrain_variants"].x]) as Texture2D
 	tile_prev.custom_minimum_size = Vector2(44, 44)
 	tile_prev.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	tile_prev.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -489,14 +503,28 @@ func _create_defender_picker_btn(did: String) -> Button:
 	v.add_child(nm)
 
 	var cost_lbl := Label.new()
+	cost_lbl.name = "CardCost"
 	cost_lbl.text = "%d" % int(data["cost"])
 	cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cost_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	cost_lbl.add_theme_font_size_override("font_size", 11)
 	cost_lbl.add_theme_color_override("font_color", Color(0.18, 0.08, 0.02))
 	cost_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(cost_lbl)
+	bg.add_child(cost_lbl)
+	bg.resized.connect(_position_card_cost.bind(bg, cost_lbl))
 
 	return btn
+
+
+func _position_card_cost(bg: TextureRect, cost: Label) -> void:
+	if bg.texture == null:
+		return
+	var texture_size := bg.texture.get_size()
+	var fit := minf(bg.size.x / texture_size.x, bg.size.y / texture_size.y)
+	var drawn_height := texture_size.y * fit
+	var plaque_y := 0.852 if bg.texture.resource_path.ends_with("_selected.png") else 0.91
+	cost.size = Vector2(bg.size.x, cost.get_combined_minimum_size().y)
+	cost.position.y = (bg.size.y - drawn_height) * 0.5 + drawn_height * plaque_y - cost.size.y * 0.5
 
 
 func _create_upgrade_btn(uid: String) -> Button:
@@ -580,6 +608,7 @@ func _refresh_ui() -> void:
 		var in_deck := GameData.is_deck_member(did)
 		var bg := d_btn.find_child("CardBg", true, false) as TextureRect
 		bg.texture = tex_card_sel if in_deck else tex_card_off
+		_position_card_cost(bg, bg.get_node("CardCost") as Label)
 		d_btn.modulate = Color.WHITE if in_deck else Color(0.78, 0.78, 0.82, 0.92)
 		var empty_sb := StyleBoxEmpty.new()
 		d_btn.add_theme_stylebox_override("normal", empty_sb)
@@ -699,10 +728,24 @@ func _auto_enter_battle() -> void:
 	_on_start_battle()
 
 
-func _on_toggle_sound() -> void:
-	GameData.sound_muted = not GameData.sound_muted
-	AudioManager.set_muted(GameData.sound_muted)
-	GameData.save_progress()
+func _show_audio_menu() -> void:
+	_audio_menu.set_item_checked(_audio_menu.get_item_index(0), GameData.sound_muted)
+	for id in range(1, 4):
+		var layer: String = ["music", "ambience", "sfx"][id - 1]
+		_audio_menu.set_item_checked(_audio_menu.get_item_index(id), GameData.audio_layers[layer])
+	var anchor := _sound_btn.get_screen_transform() * Vector2(0, _sound_btn.size.y)
+	_audio_menu.position = Vector2i(anchor)
+	_audio_menu.popup()
+
+
+func _on_audio_menu_selected(id: int) -> void:
+	if id == 0:
+		GameData.sound_muted = not GameData.sound_muted
+		AudioManager.set_muted(GameData.sound_muted)
+		GameData.save_progress()
+	else:
+		var layer: String = ["music", "ambience", "sfx"][id - 1]
+		AudioManager.set_layer_enabled(layer, not GameData.audio_layers[layer])
 	_refresh_ui()
 
 

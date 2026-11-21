@@ -3,6 +3,9 @@ class_name Defender
 
 ## Base defender controller handling all 10 Edo Garden Defense units.
 
+const BODY_ATLAS := preload("res://scripts/entities/body_atlas.gd")
+const HEALTH_BAR := preload("res://scripts/entities/health_bar.gd")
+
 var defender_id: String = "dao_tien"
 var row: int = 0
 var col: int = 0
@@ -18,6 +21,7 @@ var is_consuming: bool = false
 var _battle: Node = null
 var _data: Dictionary = {}
 var _sprite: Sprite2D
+var _health_bar: Node2D
 var _frost_sprite: Sprite2D
 var _idle_tex: Texture2D
 var _action_tex: Texture2D
@@ -56,12 +60,9 @@ func setup(battle_ref: Node, p_id: String, p_row: int, p_col: int, world_pos: Ve
 	_action_grid = _data["action_grid"]
 
 	_sprite = Sprite2D.new()
-	_sprite.texture = _idle_tex
-	_sprite.hframes = _idle_grid.x
-	_sprite.vframes = _idle_grid.y
-	_sprite.frame = 0
+	BODY_ATLAS.set_sheet(_sprite, _idle_tex, _idle_grid)
 	_sprite.scale = Vector2(0.74, 0.74)
-	_sprite.offset = Vector2(0.0, -10.0)
+	_sprite.position.y = GameData.LANE_CONTACT_OFFSET
 	add_child(_sprite)
 
 	_frost_sprite = Sprite2D.new()
@@ -69,17 +70,24 @@ func setup(battle_ref: Node, p_id: String, p_row: int, p_col: int, world_pos: Ve
 	_frost_sprite.hframes = 4
 	_frost_sprite.vframes = 3
 	_frost_sprite.frame = 5
-	_frost_sprite.scale = Vector2(0.68, 0.68)
-	_frost_sprite.offset = Vector2(0.0, -10.0)
-	_frost_sprite.visible = false
-	_frost_sprite.modulate = Color(1.0, 1.0, 1.0, 0.8)
+	_frost_sprite.scale = Vector2.ONE * 0.53
+	_frost_sprite.position.y = GameData.LANE_CONTACT_OFFSET - 25.0
+	_frost_sprite.hide()
+	_frost_sprite.modulate.a = 0.66
+	_frost_sprite.show_behind_parent = true
 	add_child(_frost_sprite)
+
+	if defender_id not in ["phao_hoa", "phu_chu"]:
+		_health_bar = HEALTH_BAR.new()
+		_health_bar.position.y = -53.0
+		_health_bar.fill_color = Color(0.28, 0.87, 0.47)
+		add_child(_health_bar)
 
 	# Slight random phase offset so idle plants don't sway in robotic unison
 	_age = randf() * TAU
 	# First action triggers slightly sooner so newly planted defenders feel responsive
 	if defender_id == "than_den":
-		_action_timer = attack_interval * 0.65
+		_action_timer = attack_interval - float(_data["first_action_delay"])
 	elif defender_id == "phao_hoa":
 		_action_timer = 0.0
 	else:
@@ -93,7 +101,7 @@ func take_damage(amount: float) -> void:
 		return
 	hp -= amount
 	_hit_flash = 0.14
-	queue_redraw()
+	_health_bar.set_health_ratio(hp / max_hp)
 	if hp <= 0.0:
 		hp = 0.0
 		if _battle:
@@ -109,7 +117,8 @@ func heal(amount: float) -> void:
 	frozen_timer = 0.0
 	if _frost_sprite:
 		_frost_sprite.visible = false
-	queue_redraw()
+	if _health_bar:
+		_health_bar.set_health_ratio(hp / max_hp)
 
 
 func apply_freeze(duration: float) -> void:
@@ -122,18 +131,9 @@ func apply_freeze(duration: float) -> void:
 
 func _draw() -> void:
 	# Soft ground shadow
-	draw_set_transform(Vector2(0.0, 30.0), 0.0, Vector2(1.0, 0.34))
+	draw_set_transform(Vector2(0.0, GameData.LANE_CONTACT_OFFSET), 0.0, Vector2(1.0, 0.34))
 	draw_circle(Vector2.ZERO, 26.0, Color(0.0, 0.0, 0.0, 0.24))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-	# Compact HP bar when damaged
-	if hp < max_hp and defender_id != "phao_hoa" and defender_id != "phu_chu":
-		var ratio := clampf(hp / max_hp, 0.0, 1.0)
-		var w := 52.0
-		var pos := Vector2(-w * 0.5, -43.0)
-		draw_rect(Rect2(pos, Vector2(w, 6.0)), Color(0.1, 0.08, 0.06, 0.78))
-		var col := Color(0.32, 0.86, 0.38) if ratio > 0.35 else Color(0.95, 0.32, 0.25)
-		draw_rect(Rect2(pos + Vector2(1, 1), Vector2((w - 2.0) * ratio, 4.0)), col)
 
 
 func _process(delta: float) -> void:
@@ -176,7 +176,7 @@ func _process_bi_ngo(delta: float) -> void:
 	var ratio := hp / max_hp
 	if ratio > 0.66:
 		_frame_accum += delta * 6.0
-		if _frame_accum >= 1.0:
+		while _frame_accum >= 1.0:
 			_frame_accum -= 1.0
 			_frame_idx = (_frame_idx + 1) % 3
 			_sprite.frame = _frame_idx
@@ -235,7 +235,7 @@ func _process_phu_chu(delta: float) -> void:
 
 	# Idle loop frames 0..5
 	_frame_accum += delta * 9.0
-	if _frame_accum >= 1.0:
+	while _frame_accum >= 1.0:
 		_frame_accum -= 1.0
 		_frame_idx = (_frame_idx + 1) % 6
 		_sprite.frame = _frame_idx
@@ -272,7 +272,7 @@ func _process_standard_defender(delta: float) -> void:
 	if _state == "idle":
 		var idle_total := _idle_grid.x * _idle_grid.y
 		_frame_accum += delta * 8.0
-		if _frame_accum >= 1.0:
+		while _frame_accum >= 1.0:
 			_frame_accum -= 1.0
 			_frame_idx = (_frame_idx + 1) % idle_total
 			_sprite.frame = _frame_idx
@@ -348,10 +348,7 @@ func _start_action() -> void:
 	_frame_idx = 0
 	_action_fired = false
 	_double_shot_fired = false
-	_sprite.texture = _action_tex
-	_sprite.hframes = _action_grid.x
-	_sprite.vframes = _action_grid.y
-	_sprite.frame = 0
+	BODY_ATLAS.set_sheet(_sprite, _action_tex, _action_grid)
 	_sprite.scale = Vector2(0.74, 0.74)
 	_sprite.rotation = 0.0
 
@@ -360,10 +357,7 @@ func _end_action() -> void:
 	_state = "idle"
 	_frame_accum = 0.0
 	_frame_idx = 0
-	_sprite.texture = _idle_tex
-	_sprite.hframes = _idle_grid.x
-	_sprite.vframes = _idle_grid.y
-	_sprite.frame = 0
+	BODY_ATLAS.set_sheet(_sprite, _idle_tex, _idle_grid)
 
 
 func _execute_action_effect() -> void:
@@ -378,7 +372,8 @@ func _execute_action_effect() -> void:
 			_fire_projectile("ice", damage)
 		"than_den":
 			var target := position + Vector2(randf_range(-24.0, 26.0), randf_range(8.0, 24.0))
-			_battle.spawn_spirit_flame(position + Vector2(0, -14), target, GameData.get_flame_value(), false)
+			var amount := GameData.get_flame_value() + GameData.LANTERN_FLAME_BONUS
+			_battle.spawn_spirit_flame(position + Vector2(0, -14), target, amount, false)
 		"nam_doc":
 			AudioManager.play_sfx("poison_puff", -6.0)
 			_battle.spawn_vfx(
@@ -420,4 +415,4 @@ func _fire_projectile(kind: String, dmg: float) -> void:
 			AudioManager.play_sfx("shoot_dart", -10.0)
 		"ice":
 			AudioManager.play_sfx("shoot_ice", -9.0)
-	_battle.spawn_projectile(position + Vector2(28.0, -6.0), row, kind, dmg)
+	_battle.spawn_projectile(position + Vector2(28.0, -16.0), row, kind, dmg)

@@ -15,9 +15,9 @@ dest_files=["res://.godot/imported/tile_snow_2.png-e00f1aabe8cb8bd863f93b2a92b09
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.77
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

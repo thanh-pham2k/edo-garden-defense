@@ -3,6 +3,9 @@ class_name Obstacle
 
 ## Battlefield obstacle (rock, spike barricade, wood fence, crate, haystack, explosive sake barrel).
 
+const BODY_ATLAS := preload("res://scripts/entities/body_atlas.gd")
+const HEALTH_BAR := preload("res://scripts/entities/health_bar.gd")
+
 var obstacle_id: String = "obs_rock"
 var row: int = 0
 var col: int = 0
@@ -14,6 +17,7 @@ var is_consuming: bool = false
 
 var _battle: Node = null
 var _sprite: Sprite2D
+var _health_bar: Node2D
 var _hit_flash: float = 0.0
 
 
@@ -32,13 +36,14 @@ func setup(battle_ref: Node, p_id: String, p_row: int, p_col: int, world_pos: Ve
 	explodes_on_destroy = bool(data.get("explodes", false))
 
 	_sprite = Sprite2D.new()
-	_sprite.texture = load(data["sheet"]) as Texture2D
-	_sprite.hframes = 2
-	_sprite.vframes = 2
-	_sprite.frame = 0
+	BODY_ATLAS.set_sheet(_sprite, load(data["sheet"]) as Texture2D, Vector2i(2, 2))
 	_sprite.scale = Vector2(0.74, 0.74)
-	_sprite.offset = Vector2(0.0, -10.0)
+	_sprite.position.y = GameData.LANE_CONTACT_OFFSET
 	add_child(_sprite)
+	_health_bar = HEALTH_BAR.new()
+	_health_bar.position.y = -45.0
+	_health_bar.fill_color = Color(0.92, 0.60, 0.26) if explodes_on_destroy else Color(0.81, 0.78, 0.68)
+	add_child(_health_bar)
 
 
 func on_enemy_melee_hit(amount: float, attacker: Node = null) -> void:
@@ -60,7 +65,7 @@ func take_damage(amount: float) -> void:
 			_sprite.frame = 1
 		else:
 			_sprite.frame = 2
-	queue_redraw()
+	_health_bar.set_health_ratio(ratio)
 	if hp <= 0.0:
 		hp = 0.0
 		destroy(true)
@@ -89,17 +94,9 @@ func destroy(play_effects: bool = true) -> void:
 
 
 func _draw() -> void:
-	draw_set_transform(Vector2(0.0, 30.0), 0.0, Vector2(1.0, 0.34))
+	draw_set_transform(Vector2(0.0, GameData.LANE_CONTACT_OFFSET), 0.0, Vector2(1.0, 0.34))
 	draw_circle(Vector2.ZERO, 26.0, Color(0.0, 0.0, 0.0, 0.24))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-	if hp < max_hp:
-		var ratio := clampf(hp / max_hp, 0.0, 1.0)
-		var w := 52.0
-		var pos := Vector2(-w * 0.5, -43.0)
-		draw_rect(Rect2(pos, Vector2(w, 6.0)), Color(0.1, 0.08, 0.06, 0.78))
-		var col := Color(0.92, 0.64, 0.20) if explodes_on_destroy else Color(0.75, 0.75, 0.78)
-		draw_rect(Rect2(pos + Vector2(1, 1), Vector2((w - 2.0) * ratio, 4.0)), col)
 
 
 func _process(delta: float) -> void:

@@ -15,9 +15,9 @@ dest_files=["res://.godot/imported/fx_smoke_puff.png-557024827a20fe49953d1d7aa95
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.84
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

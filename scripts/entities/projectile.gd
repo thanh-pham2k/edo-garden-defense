@@ -75,21 +75,23 @@ func setup(battle_ref: Node, start_pos: Vector2, p_lane: int, p_kind: String, p_
 	_sprite.vframes = grid.y
 	_sprite.frame = 0
 	_total_frames = grid.x * grid.y
-	_sprite.scale = Vector2(1.18, 1.18) if kind == "wind" else Vector2(0.62, 0.62)
+	_sprite.scale = Vector2.ONE * (0.74 if kind == "wind" else 0.62)
+	if kind == "wind":
+		_sprite.modulate.a = 0.66
 	add_child(_sprite)
 
 
 func _process(delta: float) -> void:
 	_age += delta
+	var previous_x := position.x
 	var step_x := speed * delta
+	if max_range > 0.0:
+		step_x = minf(step_x, max_range - _traveled)
 	position.x += step_x
 	_traveled += step_x
 	if kind == "wind" and max_range > 0.0:
 		if _sprite and _total_frames > 1:
 			_sprite.frame = clampi(int(clampf(_traveled / max_range, 0.0, 1.0) * float(_total_frames - 1)), 0, _total_frames - 1)
-		if _traveled >= max_range:
-			queue_free()
-			return
 	elif _sprite and _total_frames > 1:
 		_frame_accum += delta * 14.0
 		while _frame_accum >= 1.0:
@@ -104,31 +106,36 @@ func _process(delta: float) -> void:
 		return
 
 	var hit_radius := 44.0 if kind == "wind" else 34.0
-	var enemies: Array = _battle.get_enemies_in_lane(lane)
-	for enemy in enemies:
+	var first_hit: Enemy = null
+	for enemy in _battle.get_enemies_in_lane(lane):
 		if not is_instance_valid(enemy) or enemy.is_dying():
 			continue
-		if is_piercing and enemy in _hit_enemies:
+		var enemy_x: float = enemy.position.x
+		if enemy_x < previous_x - hit_radius or enemy_x > position.x + hit_radius:
 			continue
-		if absf(enemy.position.x - position.x) <= hit_radius:
-			if kind == "wind":
-				_hit_enemies.append(enemy)
-				if enemy.is_flying:
-					enemy.ground_from_wind()
-					enemy.take_damage(180.0, true)
-				else:
-					enemy.take_damage(damage, false)
-				enemy.knockback(knockback_px)
+		if is_piercing:
+			if enemy in _hit_enemies:
 				continue
-			enemy.take_damage(damage, armor_piercing)
-			if slow_ratio > 0.0:
-				enemy.apply_slow(slow_ratio, slow_duration)
-			var hit_vfx := "res://assets/sprites/fx/fx_ice_hit_splash.png" if kind == "ice" else "res://assets/sprites/fx/fx_hit_spark.png"
-			var hit_scale := 0.72 if kind == "ice" else 0.68
-			_battle.spawn_vfx(hit_vfx, Vector2i(4, 3), enemy.position + Vector2(-10.0, -8.0), 22.0, hit_scale)
-			AudioManager.play_sfx("hit", -11.0)
-			queue_free()
-			return
+			_hit_enemies.append(enemy)
+			if enemy.is_flying:
+				enemy.ground_from_wind()
+				enemy.take_damage(180.0, true)
+			else:
+				enemy.take_damage(damage, false)
+			enemy.knockback(knockback_px)
+		elif first_hit == null or enemy_x < first_hit.position.x:
+			first_hit = enemy
 
-	if position.x > 1340.0:
+	if first_hit != null:
+		first_hit.take_damage(damage, armor_piercing)
+		if slow_ratio > 0.0:
+			first_hit.apply_slow(slow_ratio, slow_duration)
+		var hit_vfx := "res://assets/sprites/fx/fx_ice_hit_splash.png" if kind == "ice" else "res://assets/sprites/fx/fx_hit_spark.png"
+		var hit_scale := 0.72 if kind == "ice" else 0.68
+		_battle.spawn_vfx(hit_vfx, Vector2i(4, 3), first_hit.position + Vector2(-10.0, -8.0), 22.0, hit_scale)
+		AudioManager.play_sfx("hit", -11.0)
+		queue_free()
+		return
+
+	if (max_range > 0.0 and _traveled >= max_range) or position.x > 1340.0:
 		queue_free()

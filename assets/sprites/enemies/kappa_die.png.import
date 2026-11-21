@@ -15,9 +15,9 @@ dest_files=["res://.godot/imported/kappa_die.png-98d4ba05cc8a9531c6dcdee8bd7e53d
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.77
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

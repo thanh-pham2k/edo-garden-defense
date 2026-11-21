@@ -15,9 +15,9 @@ dest_files=["res://.godot/imported/obs_wood_fence.png-7afa747a06f38f410fb440001f
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.77
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

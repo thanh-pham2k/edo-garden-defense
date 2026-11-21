@@ -4,6 +4,8 @@ class_name KomainuGuardian
 ## Last line of defense stone lion-dog statue on the left edge of each lane.
 ## Triggers once per lane when an enemy breaches column 0, sweeping all enemies in that lane.
 
+const BODY_ATLAS := preload("res://scripts/entities/body_atlas.gd")
+
 var lane: int = 0
 var active: bool = false
 var spent: bool = false
@@ -23,17 +25,14 @@ func setup(battle_ref: Node, p_lane: int, start_pos: Vector2) -> void:
 	z_index = 25 + lane * 2
 
 	_sprite = Sprite2D.new()
-	_sprite.texture = load("res://assets/sprites/props/prop_komainu_dash.png") as Texture2D
-	_sprite.hframes = 4
-	_sprite.vframes = 3
-	_sprite.frame = 0
+	BODY_ATLAS.set_sheet(_sprite, preload("res://assets/sprites/props/prop_komainu_dash.png"), Vector2i(4, 3))
 	_sprite.scale = Vector2(0.74, 0.74)
-	_sprite.offset = Vector2(0.0, -10.0)
+	_sprite.position.y = GameData.LANE_CONTACT_OFFSET
 	add_child(_sprite)
 
 
 func _draw() -> void:
-	draw_set_transform(Vector2(0.0, 30.0), 0.0, Vector2(1.0, 0.34))
+	draw_set_transform(Vector2(0.0, GameData.LANE_CONTACT_OFFSET), 0.0, Vector2(1.0, 0.34))
 	draw_circle(Vector2.ZERO, 26.0, Color(0.0, 0.0, 0.0, 0.24))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -60,7 +59,7 @@ func _process(delta: float) -> void:
 
 	position.x += _speed * delta
 	_frame_accum += delta * 15.0
-	if _frame_accum >= 1.0:
+	while _frame_accum >= 1.0:
 		_frame_accum -= 1.0
 		_dash_frame = 6 + ((_dash_frame - 6 + 1) % 6)
 		if _sprite:
