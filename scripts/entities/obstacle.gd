@@ -1,0 +1,109 @@
+extends Node2D
+class_name Obstacle
+
+## Battlefield obstacle (rock, spike barricade, wood fence, crate, haystack, explosive sake barrel).
+
+var obstacle_id: String = "obs_rock"
+var row: int = 0
+var col: int = 0
+var max_hp: float = 400.0
+var hp: float = 400.0
+var thorns_damage: float = 0.0
+var explodes_on_destroy: bool = false
+var is_consuming: bool = false
+
+var _battle: Node = null
+var _sprite: Sprite2D
+var _hit_flash: float = 0.0
+
+
+func setup(battle_ref: Node, p_id: String, p_row: int, p_col: int, world_pos: Vector2) -> void:
+	_battle = battle_ref
+	obstacle_id = p_id
+	row = p_row
+	col = p_col
+	position = world_pos
+	z_index = 20 + row * 2
+
+	var data: Dictionary = GameData.OBSTACLES[p_id]
+	max_hp = float(data["hp"])
+	hp = max_hp
+	thorns_damage = float(data.get("thorns", 0.0))
+	explodes_on_destroy = bool(data.get("explodes", false))
+
+	_sprite = Sprite2D.new()
+	_sprite.texture = load(data["sheet"]) as Texture2D
+	_sprite.hframes = 2
+	_sprite.vframes = 2
+	_sprite.frame = 0
+	_sprite.scale = Vector2(0.74, 0.74)
+	_sprite.offset = Vector2(0.0, -10.0)
+	add_child(_sprite)
+
+
+func on_enemy_melee_hit(amount: float, attacker: Node = null) -> void:
+	if thorns_damage > 0.0 and attacker != null and is_instance_valid(attacker) and attacker.has_method("take_damage"):
+		attacker.take_damage(thorns_damage, false)
+	take_damage(amount)
+
+
+func take_damage(amount: float) -> void:
+	if is_consuming or hp <= 0.0:
+		return
+	hp -= amount
+	_hit_flash = 0.12
+	var ratio := hp / max_hp
+	if _sprite:
+		if ratio > 0.66:
+			_sprite.frame = 0
+		elif ratio > 0.33:
+			_sprite.frame = 1
+		else:
+			_sprite.frame = 2
+	queue_redraw()
+	if hp <= 0.0:
+		hp = 0.0
+		destroy(true)
+
+
+func destroy(play_effects: bool = true) -> void:
+	if is_consuming:
+		return
+	is_consuming = true
+	if _battle:
+		if explodes_on_destroy and play_effects:
+			AudioManager.play_sfx("explosion", -1.0)
+			_battle.trigger_screen_shake(8.5, 0.32)
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_explosion.png", Vector2i(4, 4), position + Vector2(0, -8), 20.0, 1.25)
+			for enemy in _battle.get_all_enemies():
+				if is_instance_valid(enemy) and not enemy.is_dying():
+					if absi(enemy.lane - row) <= 1 and absf(enemy.position.x - position.x) <= GameData.CELL_SIZE.x * 1.65:
+						enemy.take_damage(480.0, true)
+						enemy.apply_poison(14.0, 3.5)
+						_battle.spawn_vfx("res://assets/sprites/fx/fx_burn_flame.png", Vector2i(4, 3), enemy.position + Vector2(0, -8), 16.0, 0.65, 1.2)
+			_battle.spawn_spirit_flame(position + Vector2(0, -14), position + Vector2(8, 14), 25, false)
+		elif play_effects:
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_smoke_puff.png", Vector2i(4, 3), position + Vector2(0, -8), 24.0, 0.55)
+		_battle.remove_obstacle(self)
+	queue_free()
+
+
+func _draw() -> void:
+	draw_set_transform(Vector2(0.0, 30.0), 0.0, Vector2(1.0, 0.34))
+	draw_circle(Vector2.ZERO, 26.0, Color(0.0, 0.0, 0.0, 0.24))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	if hp < max_hp:
+		var ratio := clampf(hp / max_hp, 0.0, 1.0)
+		var w := 52.0
+		var pos := Vector2(-w * 0.5, -43.0)
+		draw_rect(Rect2(pos, Vector2(w, 6.0)), Color(0.1, 0.08, 0.06, 0.78))
+		var col := Color(0.92, 0.64, 0.20) if explodes_on_destroy else Color(0.75, 0.75, 0.78)
+		draw_rect(Rect2(pos + Vector2(1, 1), Vector2((w - 2.0) * ratio, 4.0)), col)
+
+
+func _process(delta: float) -> void:
+	if _hit_flash > 0.0:
+		_hit_flash = maxf(0.0, _hit_flash - delta)
+		if _sprite:
+			_sprite.modulate = Color(1.5, 1.3, 1.3, 1.0) if _hit_flash > 0.0 else Color.WHITE
