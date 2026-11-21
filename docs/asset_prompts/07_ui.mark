@@ -1,0 +1,38 @@
+# 07 — Giao Diện (UI & HUD) — Asset Prompts
+
+- **Danh mục:** Giao diện (HUD cơ bản P0 + Icon, Nút bấm, Màn hình Menu / Chọn màn / Chiến thắng / Thua P1-P2)
+- **Thư mục nhận raw:** `inbox/`
+- **Thư mục đích sau adapt:** `assets/sprites/ui/`
+- **Quy chuẩn chung:** Phong cách giấy Washi, gỗ sơn mài ấm, viền vàng/nâu đậm Edo chibi, KHÔNG chữ trên nút/khung (chữ sẽ render trực tiếp bằng font trong Godot để sắc nét trên mọi độ phân giải Web & Mobile), nền trắng phẳng `#FFFFFF`.
+
+---
+
+## 1. Linh Hỏa — Vật phẩm nhặt & Icon HUD (`ui_spirit_flame_anim.png`) — [P0]
+*6 frames (`3×2`): Ngọn lửa Linh Hỏa xanh ngọc lấp lánh (dùng cả làm vật phẩm rơi để người chơi chạm/vuốt nhặt và làm icon HUD).*
+```
+2D Japanese Edo-period chibi game collectible sprite sheet, 3 columns by 2 rows (6 equal-sized square cells), seamless glowing animation of a cute radiant blue-cyan Spirit Flame orb (Linh Hoa resource) with bright white-gold inner core and delicate curling spirit wisp tail. Frame progression from top-left to bottom-right: lively smooth flickering flame dance with soft pulsing halo and tiny sparkling motes. Center-aligned in every cell. Hand-drawn 2D game art style, crisp luminous teal-blue outlines, vibrant glowing aqua and gold cel-shaded watercolor coloring. Pure flat solid white background (#FFFFFF), no grid lines, no borders, no text, no drop shadow on the background.
+```
+
+## 2. Bộ Khung Thẻ Quân & HUD Cơ Bản (`ui_hud_cards_pack.png`) — [P0]
+*Gồm 6 subimages (`3×2`): Khung thẻ quân sẵn sàng, Khung thẻ đang chọn (viền vàng sáng), Khung thẻ khóa/hồi chiêu (xám), Khung bộ đếm Linh Hỏa, Thanh tiến độ đợt trống + thanh xanh lá, Icon đầu Oni nhỏ cho thanh đợt.*
+```
+2D Japanese Edo-period chibi game UI elements pack, 3 columns by 2 rows (6 cleanly separated equal-sized cells), blank text-free Edo wood and parchment UI components. Cell 1: vertical rounded cream-parchment defender seed card frame with warm wooden border and small bottom price tag badge. Cell 2: glowing golden-highlighted selected defender card frame with bright festive aura. Cell 3: muted cool-gray wooden locked/cooldown card frame. Cell 4: horizontal rounded cream parchment resource counter pill frame with wooden rim and left socket for flame icon. Cell 5: horizontal wooden wave progress bar frame with vibrant emerald-green fill bar. Cell 6: cute chibi angry red Oni head marker icon for wave progress slider. Hand-drawn 2D game art style, thick clean dark-brown ink outlines, warm wood, gold, and washi paper cel-shaded coloring. No text, no numbers, pure flat solid white background (#FFFFFF), no grid lines.
+```
+
+## 3. Bộ Nút Điều Khiển HUD (`ui_buttons_pack.png`) — [P0]
+*Gồm 6 subimages (`3×2`): Nút Tăng tốc `2x` (`>>`), Nút Tạm dừng (`||`), Nút Tiếp tục (`>`), Nút Xẻng thu hồi cây, Nút Loa bật âm thanh, Nút Cài đặt bánh răng.*
+```
+2D Japanese Edo-period chibi game UI icon buttons pack, 3 columns by 2 rows (6 cleanly separated equal-sized square cells), tactile rounded square warm wooden-and-gold game buttons designed for both web and mobile touch screens. Cell 1: fast-forward double-arrow (>>) button. Cell 2: pause two-vertical-bars (||) button. Cell 3: play single-triangle (>) button. Cell 4: garden shovel tool icon button for removing defenders. Cell 5: audio speaker sound-on icon button. Cell 6: wooden-gold settings gear icon button. Hand-drawn 2D game art style, thick clean dark-brown ink outlines, glossy warm amber gold and cedar wood cel-shaded coloring, readable bold silhouettes. No text, no letters, pure flat solid white background (#FFFFFF), no grid lines.
+```
+
+## 4. Bộ Khung Bảng & Cuộn Giấy Màn Hình (`ui_panels_scrolls_pack.png`) — [P2]
+*Gồm 4 subimages (`2×2`): Bảng cuộn giấy ngang lớn (Pause/Settings), Khung ruy-băng đỏ-vàng tiêu đề Chiến Thắng, Khung ruy-băng tím-xám tiêu đề Thất Bại, Khung nút bấm chữ nhật Edo (Xanh lá / Cam vàng).*
+```
+2D Japanese Edo-period chibi game UI modal panels pack, 2 columns by 2 rows (4 cleanly separated cells), blank text-free ornamental Japanese UI frames. Cell 1 (top-left): wide unfurled cream Japanese washi paper scroll modal panel with dark wooden roller handles, red tassels, and subtle corner sakura flower ornaments. Cell 2 (top-right): festive crimson-and-gold Edo victory banner ribbon with blooming sakura blossoms and golden fan accents (blank center, no text). Cell 3 (bottom-left): dramatic twilight-purple and weathered wood defeat banner ribbon with tiny cloud wisps (blank center, no text). Cell 4 (bottom-right): pair of clean rounded rectangular Edo wooden-gold UI action buttons stacked with space between them — top button vibrant emerald green, bottom button warm vermilion orange (blank, no text). Hand-drawn 2D game art style, thick clean dark-brown ink outlines, warm cel-shaded watercolor coloring. Pure flat solid white background (#FFFFFF), no grid lines, no text.
+```
+
+## 5. Bộ Icon Chọn Màn & Đánh Giá Sao (`ui_level_select_pack.png`) — [P2]
+*Gồm 6 subimages (`3×2`): Nút màn chơi đã mở (đỏ-vàng), Nút màn chơi đang chọn (phát sáng), Nút màn chơi bị khóa (ổ khóa gỗ), Bông hoa anh đào vàng (đánh giá Sao sáng), Bông hoa anh đào xám (chưa đạt), Biểu tượng Trùm Oni trên bản đồ.*
+```
+2D Japanese Edo-period chibi game level-select map icons pack, 3 columns by 2 rows (6 cleanly separated equal-sized square cells), blank text-free map node badges. Cell 1: circular vermilion-and-gold unlocked stage node emblem with wooden rim. Cell 2: glowing radiant golden current-stage node with tiny sakura petals. Cell 3: weathered gray stone locked stage node with cute iron padlock. Cell 4: bright shiny golden 5-petal sakura star badge (earned rating). Cell 5: dim muted gray-brown 5-petal sakura star badge (unearned rating). Cell 6: dramatic red-gold boss stage node emblem featuring chibi Oni horns. Hand-drawn 2D game art style, thick clean dark-brown ink outlines, vibrant cel-shaded watercolor coloring. No text, no numbers, pure flat solid white background (#FFFFFF), no grid lines.
+```
