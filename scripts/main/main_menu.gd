@@ -108,8 +108,8 @@ func _build_ui() -> void:
 	title_box.add_child(title_hbox)
 
 	var logo := TextureRect.new()
-	logo.texture = load("res://assets/sprites/defenders/dao_tien_icon.png") as Texture2D
-	logo.custom_minimum_size = Vector2(64, 64)
+	logo.texture = load("res://assets/sprites/ui/gardener_happy.png") as Texture2D
+	logo.custom_minimum_size = Vector2(72, 72)
 	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	title_hbox.add_child(logo)
@@ -157,17 +157,21 @@ func _build_ui() -> void:
 
 	# Auto-collect toggle
 	_auto_collect_btn = Button.new()
-	_auto_collect_btn.custom_minimum_size = Vector2(184, 54)
+	_auto_collect_btn.custom_minimum_size = Vector2(198, 54)
 	_auto_collect_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_auto_collect_btn.add_theme_font_size_override("font_size", 14)
+	_auto_collect_btn.add_theme_font_size_override("font_size", 13)
+	_auto_collect_btn.icon = load("res://assets/sprites/ui/ui_btn_auto_collect.png") as Texture2D
+	_auto_collect_btn.expand_icon = true
 	_auto_collect_btn.pressed.connect(_on_toggle_auto_collect)
 	header.add_child(_auto_collect_btn)
 
 	# Auto-play 5x (10m) toggle
 	_auto_play_btn = Button.new()
-	_auto_play_btn.custom_minimum_size = Vector2(168, 54)
+	_auto_play_btn.custom_minimum_size = Vector2(182, 54)
 	_auto_play_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_auto_play_btn.add_theme_font_size_override("font_size", 14)
+	_auto_play_btn.add_theme_font_size_override("font_size", 13)
+	_auto_play_btn.icon = load("res://assets/sprites/ui/ui_kitsune_auto.png") as Texture2D
+	_auto_play_btn.expand_icon = true
 	_auto_play_btn.tooltip_text = "Bật/Tắt chế độ Tự Chơi 5x trong 10 phút"
 	_auto_play_btn.pressed.connect(_on_toggle_auto_play)
 	header.add_child(_auto_play_btn)
@@ -611,9 +615,11 @@ func _refresh_ui() -> void:
 	_selected_level_label.text = "Đang chọn: %s (%d đợt)" % [cur_lvl["name"], cur_lvl["waves"].size()]
 	if _bg_preview_rect and cur_lvl.has("bg_stem"):
 		_bg_preview_rect.texture = load("res://assets/sprites/backgrounds/%s_2.png" % cur_lvl["bg_stem"]) as Texture2D
-	_auto_collect_btn.text = "Tự hút Linh Hỏa: BẬT" if GameData.auto_collect_flame else "Tự hút Linh Hỏa: TẮT"
+	_auto_collect_btn.text = "Hút Linh Hỏa: BẬT" if GameData.auto_collect_flame else "Hút Linh Hỏa: TẮT"
 	_update_auto_play_btn()
-	_sound_btn.modulate = Color(0.55, 0.55, 0.55, 0.85) if GameData.sound_muted else Color.WHITE
+	var sound_tex_path := "res://assets/sprites/ui/ui_btn_sound_muted.png" if GameData.sound_muted else "res://assets/sprites/ui/ui_btn_sound.png"
+	_sound_btn.texture_normal = load(sound_tex_path) as Texture2D
+	_sound_btn.modulate = Color.WHITE
 
 
 func _on_select_level(level_id: int) -> void:
@@ -711,14 +717,24 @@ func _build_portrait_overlay() -> Control:
 	overlay.color = Color(0.08, 0.06, 0.05, 0.92)
 	overlay.visible = false
 	overlay.z_index = 200
+	var v := VBoxContainer.new()
+	v.set_anchors_preset(Control.PRESET_FULL_RECT)
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", 18)
+	overlay.add_child(v)
+	var ic := TextureRect.new()
+	ic.texture = load("res://assets/sprites/ui/ui_rotate_landscape.png") as Texture2D
+	ic.custom_minimum_size = Vector2(180, 180)
+	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	v.add_child(ic)
 	var lbl := Label.new()
 	lbl.text = "Vui lòng xoay ngang điện thoại\nđể bảo vệ Khu Vườn Edo!"
-	lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lbl.add_theme_font_size_override("font_size", 28)
 	lbl.add_theme_color_override("font_color", Color(0.98, 0.90, 0.72))
-	overlay.add_child(lbl)
+	v.add_child(lbl)
 	return overlay
 
 

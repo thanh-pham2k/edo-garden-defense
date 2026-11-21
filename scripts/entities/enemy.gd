@@ -3,6 +3,12 @@ class_name Enemy
 
 ## Yokai enemy controller supporting all 10 unique Yokai behaviors.
 
+const BADGE_ARMOR := preload("res://assets/sprites/ui/badge_armor.png")
+const BADGE_POISON := preload("res://assets/sprites/ui/badge_poison.png")
+const BADGE_SLOW := preload("res://assets/sprites/ui/badge_slow.png")
+const BADGE_FLYING := preload("res://assets/sprites/ui/badge_flying.png")
+const BADGE_BOSS := preload("res://assets/sprites/ui/badge_boss.png")
+
 var enemy_id: String = "tieu_yeu"
 var lane: int = 0
 var max_hp: float = 180.0
@@ -21,6 +27,8 @@ var slow_timer: float = 0.0
 var slow_ratio: float = 0.0
 var poison_timer: float = 0.0
 var poison_dps: float = 0.0
+var _kb_remaining: float = 0.0
+var _kb_cooldown: float = 0.0
 
 var has_vaulted: bool = false
 var has_switched_lane: bool = false
@@ -107,10 +115,13 @@ func take_damage(amount: float, armor_piercing: bool = false) -> void:
 	if not armor_piercing and damage_reduction > 0.0:
 		eff *= (1.0 - damage_reduction)
 
+	var was_armored := armor_hp > 0.0
 	if not armor_piercing and armor_hp > 0.0:
 		var absorbed := minf(armor_hp, eff)
 		armor_hp -= absorbed
 		eff -= absorbed
+		if was_armored and armor_hp <= 0.0 and _battle:
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_armor_break.png", Vector2i(4, 3), position + Vector2(0, -10), 20.0, 0.85)
 
 	hp -= eff
 	_hit_flash = 0.12
@@ -123,8 +134,11 @@ func take_damage(amount: float, armor_piercing: bool = false) -> void:
 func apply_slow(ratio: float, duration: float) -> void:
 	if is_dying():
 		return
+	var had := slow_timer > 0.0
 	slow_ratio = maxf(slow_ratio, ratio)
 	slow_timer = maxf(slow_timer, duration)
+	if not had:
+		queue_redraw()
 
 
 func apply_stun(duration: float) -> void:
@@ -138,28 +152,41 @@ func apply_stun(duration: float) -> void:
 func apply_poison(dps: float, duration: float) -> void:
 	if is_dying():
 		return
+	var had := poison_timer > 0.0
 	poison_dps = maxf(poison_dps, dps)
 	poison_timer = maxf(poison_timer, duration)
+	if not had:
+		queue_redraw()
 
 
 func knockback(pixels: float) -> void:
-	if is_dying():
+	if is_dying() or _kb_cooldown > 0.0:
 		return
-	var kb := pixels * (0.45 if is_boss else 1.0)
-	position.x = minf(1195.0, position.x + kb)
+	var kb := pixels * (0.22 if is_boss else 1.0)
+	if kb <= 1.0:
+		return
+	var max_slide := 32.0 if is_boss else 130.0
+	_kb_remaining = minf(max_slide, _kb_remaining + kb)
+	_kb_cooldown = 8.0 if is_boss else 2.6
 
 
 func ground_from_wind() -> void:
 	is_flying = false
 	has_vaulted = true
+	if _state == "vault":
+		_state = "walk"
 	if _sprite:
 		_sprite.position.y = 0.0
+	queue_redraw()
 
 
 func _start_die() -> void:
 	_state = "die"
+	_kb_remaining = 0.0
 	_frame_accum = 0.0
 	_frame_idx = 0
+	if _sprite:
+		_sprite.rotation = 0.0
 	if _stun_sprite:
 		_stun_sprite.visible = false
 	_sprite.texture = _die_tex
@@ -202,6 +229,27 @@ func _draw() -> void:
 		draw_rect(Rect2(Vector2(-bar_w * 0.5, bar_y - 7.0), Vector2(bar_w, 5.0)), Color(0.08, 0.06, 0.06, 0.82))
 		draw_rect(Rect2(Vector2(-bar_w * 0.5 + 1, bar_y - 6.0), Vector2((bar_w - 2.0) * ar, 3.0)), Color(0.96, 0.80, 0.22))
 
+	# Compact overhead combat status badges
+	var badges: Array[Texture2D] = []
+	if is_boss:
+		badges.append(BADGE_BOSS)
+	if armor_hp > 0.0:
+		badges.append(BADGE_ARMOR)
+	if is_flying:
+		badges.append(BADGE_FLYING)
+	if slow_timer > 0.0:
+		badges.append(BADGE_SLOW)
+	if poison_timer > 0.0:
+		badges.append(BADGE_POISON)
+	if not badges.is_empty():
+		var icon_sz := 17.0
+		var gap := 2.0
+		var total_w := badges.size() * icon_sz + (badges.size() - 1) * gap
+		var start_x := -total_w * 0.5
+		var badge_y := bar_y - (26.0 if armor_hp > 0.0 else 20.0)
+		for i in range(badges.size()):
+			draw_texture_rect(badges[i], Rect2(start_x + i * (icon_sz + gap), badge_y, icon_sz, icon_sz), false)
+
 
 func _process(delta: float) -> void:
 	if _state == "die":
@@ -221,14 +269,20 @@ func _process(delta: float) -> void:
 
 	if poison_timer > 0.0:
 		poison_timer = maxf(0.0, poison_timer - delta)
+		if poison_timer == 0.0:
+			queue_redraw()
 		take_damage(poison_dps * delta, true)
 		if is_dying():
 			return
+
+	if _kb_cooldown > 0.0:
+		_kb_cooldown = maxf(0.0, _kb_cooldown - delta)
 
 	if slow_timer > 0.0:
 		slow_timer = maxf(0.0, slow_timer - delta)
 		if slow_timer == 0.0:
 			slow_ratio = 0.0
+			queue_redraw()
 
 	if _sprite:
 		if _hit_flash > 0.0:
@@ -246,9 +300,25 @@ func _process(delta: float) -> void:
 			_stun_sprite.visible = stun_timer > 0.0
 			var sf := int(Time.get_ticks_msec() / 70.0) % 12
 			_stun_sprite.frame = sf
-		return
 	elif _stun_sprite and _stun_sprite.visible:
 		_stun_sprite.visible = false
+
+	if _kb_remaining > 0.0:
+		var slide_speed := maxf(140.0, _kb_remaining * 9.0)
+		var step := minf(_kb_remaining, slide_speed * delta)
+		var prev_x := position.x
+		position.x = minf(1195.0, position.x + step)
+		_kb_remaining = maxf(0.0, _kb_remaining - step)
+		if position.x >= 1194.9 and is_equal_approx(position.x, prev_x):
+			_kb_remaining = 0.0
+		if _sprite:
+			_sprite.rotation = clampf(_kb_remaining / 120.0, 0.0, 1.0) * (0.07 if is_boss else 0.16)
+		return
+	elif _sprite and _sprite.rotation != 0.0:
+		_sprite.rotation = 0.0
+
+	if stun_timer > 0.0:
+		return
 
 	var speed_mult := 1.0 - slow_ratio
 	var anim_fps := 13.5 * speed_mult
@@ -472,6 +542,7 @@ func _execute_special_skill() -> void:
 	if _battle == null:
 		return
 	if enemy_id == "miko_ma":
+		_battle.spawn_vfx("res://assets/sprites/fx/fx_miko_summon_circle.png", Vector2i(4, 3), position + Vector2(0, 12), 18.0, 0.92)
 		var lanes := [clampi(lane - 1, 0, GameData.GRID_ROWS - 1), clampi(lane + 1, 0, GameData.GRID_ROWS - 1)]
 		for target_lane in lanes:
 			var spawn_pos := Vector2(clampf(position.x + 22.0, 260.0, 1140.0), GameData.GRID_ORIGIN.y + (target_lane + 0.5) * GameData.CELL_SIZE.y)
@@ -480,5 +551,8 @@ func _execute_special_skill() -> void:
 	elif enemy_id == "yuki_onna":
 		var target := _find_freeze_target()
 		if target != null and is_instance_valid(target):
+			var target_2d := target as Node2D
+			var mid_pos: Vector2 = (position + target_2d.position) * 0.5 + Vector2(0, -8)
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_yuki_ice_breath.png", Vector2i(4, 3), mid_pos, 18.0, 0.88)
 			target.apply_freeze(4.5)
-			_battle.spawn_vfx("res://assets/sprites/fx/fx_freeze_overlay.png", Vector2i(4, 3), target.position + Vector2(0, -8), 16.0, 0.85)
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_freeze_overlay.png", Vector2i(4, 3), target_2d.position + Vector2(0, -8), 16.0, 0.85)

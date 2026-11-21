@@ -52,6 +52,8 @@ UI_PRESERVE_INTERIOR = {
     "ui_buttons_pack.png",
     "ui_panels_scrolls_pack.png",
     "ui_level_select_pack.png",
+    "ui_branding_icons_pack.png",
+    "ui_extended_hud_pack.png",
 }
 
 
@@ -116,7 +118,7 @@ def find_grid_cuts(arr: np.ndarray, cols: int, rows: int, per_row_cols: bool = F
     return row_xs, ys
 
 
-def remove_background(cell_rgb: np.ndarray, canonical_name: str) -> np.ndarray:
+def remove_background(cell_rgb: np.ndarray, canonical_name: str, force_holes: bool = False) -> np.ndarray:
     h, w = cell_rgb.shape[:2]
     r = cell_rgb[:, :, 0].astype(np.int16)
     g = cell_rgb[:, :, 1].astype(np.int16)
@@ -149,7 +151,7 @@ def remove_background(cell_rgb: np.ndarray, canonical_name: str) -> np.ndarray:
         for i in range(1, pn + 1):
             if i not in pborder and counts[i] >= 500:
                 bg |= (plbl == i)
-    elif canonical_name in HOLE_BY_DARK_OUTLINE:
+    elif force_holes or canonical_name in HOLE_BY_DARK_OUTLINE:
         pure = (mn >= 247) & (chroma <= 8)
         plbl, pn = ndimage.label(pure, structure=struct4)
         pborder = set(np.unique(plbl[border_mask])) - {0}
@@ -174,6 +176,32 @@ def remove_background(cell_rgb: np.ndarray, canonical_name: str) -> np.ndarray:
     # Also reduce white halo color bleed on semi-transparent fringe pixels
     rgba = np.dstack([cell_rgb, alpha])
     return rgba
+
+
+def remove_white_soft_matte(cell_rgb: np.ndarray, mode: str = "glow") -> np.ndarray:
+    """Convert soft-glow / mist graphics drawn on #FFFFFF into clean semi-transparent RGBA."""
+    rgb = cell_rgb.astype(np.float32)
+    mn = rgb.min(axis=2)
+    mx = rgb.max(axis=2)
+    dist_white = 255.0 - mn
+    # Boost alpha slightly so bright glow / mist colors remain vivid when unmultiplied
+    gain = 1.15 if mode in ("mist", "snow") else 1.25
+    raw_alpha = np.clip((dist_white - 6.0) / 249.0 * gain, 0.0, 1.0)
+    # Zero out near-white noise
+    raw_alpha = np.where(dist_white <= 8.0, 0.0, raw_alpha)
+
+    safe_a = np.maximum(raw_alpha, 1e-4)[:, :, None]
+    unmult_rgb = 255.0 - (255.0 - rgb) / safe_a
+    # Keep luminous white highlights in bright centers where color already exists nearby
+    if mode in ("glow", "beam", "firefly"):
+        bright_core = (dist_white >= 55.0) & (mx >= 245.0)
+        raw_alpha = np.where(bright_core, np.maximum(raw_alpha, np.clip((dist_white - 20.0) / 160.0, 0.0, 0.95)), raw_alpha)
+        safe_a = np.maximum(raw_alpha, 1e-4)[:, :, None]
+        unmult_rgb = 255.0 - (255.0 - rgb) / safe_a
+
+    out_rgb = np.clip(unmult_rgb, 0.0, 255.0).astype(np.uint8)
+    out_a = np.clip(raw_alpha * 255.0, 0.0, 255.0).astype(np.uint8)
+    return np.dstack([out_rgb, out_a])
 
 
 def trim_alpha_bbox(rgba: np.ndarray, alpha_thresh: int = 12):
@@ -232,16 +260,84 @@ def normalize_sheet(
     return sheet, frames
 
 
-def extract_cells(img_arr: np.ndarray, cols: int, rows: int, canonical_name: str):
-    per_row = canonical_name.endswith("_pack.png") or canonical_name.startswith("items_")
+def extract_cells(
+    img_arr: np.ndarray,
+    cols: int,
+    rows: int,
+    canonical_name: str,
+    per_row: bool = None,
+    soft_matte_modes: dict = None,
+    hole_cells: set = None,
+):
+    if per_row is None:
+        per_row = (
+            canonical_name.endswith("_pack.png")
+            or canonical_name.startswith("items_")
+            or canonical_name in {"char_gardener_portraits.png", "proj_dart_poison_anim.png"}
+        )
     row_xs, ys = find_grid_cuts(img_arr, cols, rows, per_row_cols=per_row)
     cells = []
+    idx = 0
     for r in range(rows):
         xs = row_xs[r]
         for c in range(cols):
             sub = img_arr[ys[r]:ys[r + 1], xs[c]:xs[c + 1]]
-            cells.append(remove_background(sub, canonical_name))
+            if soft_matte_modes and idx in soft_matte_modes:
+                cells.append(remove_white_soft_matte(sub, mode=soft_matte_modes[idx]))
+            else:
+                use_holes = bool(hole_cells and idx in hole_cells)
+                cells.append(remove_background(sub, canonical_name, force_holes=use_holes))
+            idx += 1
     return cells
+
+
+def save_proportional_trimmed(rgba: np.ndarray, out_path: str, target_height: int = 0, max_dim: int = 0):
+    b = trim_alpha_bbox(rgba)
+    if b is None:
+        Image.new("RGBA", (64, target_height or 64), (0, 0, 0, 0)).save(out_path)
+        return
+    crop = Image.fromarray(rgba[b[1]:b[3], b[0]:b[2]])
+    sc = 1.0
+    if target_height > 0:
+        sc = target_height / max(1, crop.height)
+    elif max_dim > 0 and max(crop.width, crop.height) > max_dim:
+        sc = max_dim / max(crop.width, crop.height)
+    if abs(sc - 1.0) > 1e-3:
+        nw = max(1, int(round(crop.width * sc)))
+        nh = max(1, int(round(crop.height * sc)))
+        crop = crop.resize((nw, nh), Image.Resampling.LANCZOS)
+    crop.save(out_path)
+
+
+def adapt_animated_tile_sheet(img_arr: np.ndarray, cols: int, rows: int, tile_size: int, out_path: str):
+    row_xs, ys = find_grid_cuts(img_arr, cols, rows, per_row_cols=True)
+    sheet = Image.new("RGBA", (cols * tile_size, rows * tile_size), (0, 0, 0, 0))
+    for r in range(rows):
+        xs = row_xs[r]
+        for c in range(cols):
+            sub = img_arr[ys[r]:ys[r + 1], xs[c]:xs[c + 1]]
+            mx = sub.max(axis=2)
+            mn = sub.min(axis=2)
+            white_mask = (mn >= 242) & ((mx - mn) <= 14)
+            sh, sw = sub.shape[:2]
+            top, bottom = 0, sh
+            while top < sh - 10 and white_mask[top, :].mean() >= 0.72:
+                top += 1
+            while bottom > top + 10 and white_mask[bottom - 1, :].mean() >= 0.72:
+                bottom -= 1
+            left, right = 0, sw
+            while left < sw - 10 and white_mask[:, left].mean() >= 0.72:
+                left += 1
+            while right > left + 10 and white_mask[:, right - 1].mean() >= 0.72:
+                right -= 1
+            pw, ph = right - left, bottom - top
+            ix = max(2, int(round(pw * 0.025)))
+            iy = max(2, int(round(ph * 0.025)))
+            core = sub[top + iy:bottom - iy, left + ix:right - ix]
+            rgba_core = np.dstack([core, np.full(core.shape[:2], 255, dtype=np.uint8)])
+            tile = Image.fromarray(rgba_core).resize((tile_size, tile_size), Image.Resampling.LANCZOS)
+            sheet.paste(tile, (c * tile_size, r * tile_size))
+    sheet.save(out_path)
 
 
 def adapt_tile_sheet(img_arr: np.ndarray, canonical_name: str):
@@ -357,7 +453,7 @@ def adapt_background_sheet(img_arr: np.ndarray, canonical_name: str):
 
 
 def adapt_all(from_archive: bool = False):
-    for sub in ["defenders", "enemies", "tiles", "obstacles", "props", "fx", "ui", "backgrounds", "items"]:
+    for sub in ["defenders", "enemies", "tiles", "obstacles", "props", "fx", "ui", "backgrounds", "items", "environments"]:
         os.makedirs(os.path.join(SPRITES_DIR, sub), exist_ok=True)
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
@@ -529,7 +625,9 @@ def adapt_all(from_archive: bool = False):
         elif cname.startswith("fx_"):
             out_dir = os.path.join(SPRITES_DIR, "fx")
             cells = extract_cells(img_arr, 4, 3, cname)
-            anchor = "bottom-center" if cname == "fx_burn_flame.png" else "center"
+            anchor = "bottom-center" if cname in {
+                "fx_burn_flame.png", "fx_thunder_strike.png", "fx_miko_summon_circle.png"
+            } else "center"
             sheet, _ = normalize_sheet(cells, 4, 3, 128, anchor=anchor, max_content_ratio=0.90)
             sheet.save(os.path.join(out_dir, cname))
 
@@ -609,6 +707,146 @@ def adapt_all(from_archive: bool = False):
             }
             for c_rgba, iname in zip(cells, item_map[cname]):
                 save_single_trimmed(c_rgba, os.path.join(out_dir, iname), size=128, anchor="center")
+
+        # 8. Extended Environment Layers & Chapter Landmarks (6 files)
+        elif cname == "env_top_borders_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "environments")
+            # Knock out white gaps behind wooden/bamboo fences on cells 0..2, preserve white castle plaster walls in cell 3
+            cells = extract_cells(img_arr, 2, 2, cname, hole_cells={0, 1, 2})
+            for idx, c_rgba in enumerate(cells):
+                save_proportional_trimmed(c_rgba, os.path.join(out_dir, f"env_border_top_ch{idx + 1}.png"), target_height=160)
+
+        elif cname == "env_lawn_borders_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "environments")
+            cells = extract_cells(img_arr, 3, 2, cname, hole_cells={0})
+            names = [
+                "env_border_top_ch5.png", "env_edge_moss_stones.png", "env_edge_koi_bank.png",
+                "env_edge_snowdrift.png", "env_path_stepping_stones.png", "env_edge_bamboo_flowers.png",
+            ]
+            for c_rgba, ename in zip(cells, names):
+                save_proportional_trimmed(c_rgba, os.path.join(out_dir, ename), target_height=112)
+
+        elif cname == "env_chapter_houses_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "environments")
+            cells = extract_cells(img_arr, 2, 2, cname)
+            names = [
+                "house_ch2_teahouse.png", "house_ch3_koi_shrine.png",
+                "house_ch4_castle_guard.png", "house_ch5_snow_shrine.png",
+            ]
+            for c_rgba, hname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, hname), size=256, anchor="bottom-center")
+
+        elif cname == "env_chapter_gates_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "environments")
+            cells = extract_cells(img_arr, 2, 2, cname, hole_cells={0, 1, 2, 3})
+            names = [
+                "gate_ch2_bamboo.png", "gate_ch3_night_torii.png",
+                "gate_ch4_castle_gate.png", "gate_ch5_snow_torii.png",
+            ]
+            for c_rgba, gname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, gname), size=256, anchor="bottom-center")
+
+        elif cname == "env_biome_flora_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "environments")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            names = [
+                "flora_snow_pine.png", "flora_autumn_maple.png", "flora_night_sakura.png",
+                "flora_sunset_bamboo.png", "flora_sakura_hedge.png", "flora_moss_lantern_cluster.png",
+            ]
+            for c_rgba, fname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, fname), size=256, anchor="bottom-center")
+
+        elif cname == "env_atmosphere_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "environments")
+            cells = extract_cells(
+                img_arr,
+                3,
+                2,
+                cname,
+                soft_matte_modes={1: "mist", 2: "glow", 3: "beam", 4: "firefly", 5: "snow"},
+            )
+            names = [
+                "env_atmo_clouds.png", "env_atmo_mist.png", "env_atmo_lantern_glow.png",
+                "env_atmo_sunbeam.png", "env_atmo_fireflies.png", "env_atmo_snow_wind.png",
+            ]
+            for c_rgba, aname in zip(cells, names):
+                save_proportional_trimmed(c_rgba, os.path.join(out_dir, aname), max_dim=256)
+
+        # 9. Gardener Mascot Portraits, Branding & Extended UI (3 files)
+        elif cname == "char_gardener_portraits.png":
+            out_dir = os.path.join(SPRITES_DIR, "ui")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            names = [
+                "gardener_happy.png", "gardener_determined.png", "gardener_alert.png",
+                "gardener_victory.png", "gardener_worried.png", "gardener_tutorial.png",
+            ]
+            for c_rgba, pname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, pname), size=256, anchor="bottom-center")
+
+        elif cname == "ui_branding_icons_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "ui")
+            cells = extract_cells(img_arr, 2, 2, cname)
+            specs = [
+                ("ui_title_plaque.png", 0),
+                ("ui_app_icon.png", 256),
+                ("ui_rotate_landscape.png", 192),
+                ("ui_kitsune_auto.png", 128),
+            ]
+            for c_rgba, (uname, sz) in zip(cells, specs):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, uname), size=sz, anchor="center")
+
+        elif cname == "ui_extended_hud_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "ui")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            specs = [
+                ("ui_skill_frame_ready.png", 128),
+                ("ui_skill_frame_cooldown.png", 128),
+                ("ui_dialogue_box.png", 0),
+                ("ui_almanac_book.png", 0),
+                ("ui_btn_sound_muted.png", 128),
+                ("ui_btn_auto_collect.png", 128),
+            ]
+            for c_rgba, (uname, sz) in zip(cells, specs):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, uname), size=sz, anchor="center")
+
+        # 10. Water Platforms, Animated Koi Tile, Animated Projectiles & Status Badges
+        elif cname == "water_platforms_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "tiles")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            names = [
+                "water_lily_pad.png", "water_lily_lotus.png", "water_bamboo_raft.png",
+                "water_splash_ring.png", "water_stepping_stone.png", "water_lily_damaged.png",
+            ]
+            for c_rgba, wname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, wname), size=128, anchor="center")
+
+        elif cname == "env_koi_water_anim.png":
+            out_dir = os.path.join(SPRITES_DIR, "tiles")
+            adapt_animated_tile_sheet(img_arr, 4, 3, 128, os.path.join(out_dir, cname))
+
+        elif cname in {"proj_sakura_petal_anim.png", "proj_ice_orb_anim.png"}:
+            out_dir = os.path.join(SPRITES_DIR, "fx")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            sheet, _ = normalize_sheet(cells, 3, 2, 96, anchor="center", max_content_ratio=0.90)
+            sheet.save(os.path.join(out_dir, cname))
+
+        elif cname == "proj_dart_poison_anim.png":
+            out_dir = os.path.join(SPRITES_DIR, "fx")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            dart_sheet, _ = normalize_sheet(cells[0:3], 3, 1, 96, anchor="center", max_content_ratio=0.90)
+            dart_sheet.save(os.path.join(out_dir, "proj_bamboo_dart_anim.png"))
+            poison_sheet, _ = normalize_sheet(cells[3:6], 3, 1, 96, anchor="center", max_content_ratio=0.90)
+            poison_sheet.save(os.path.join(out_dir, "proj_poison_glob_anim.png"))
+
+        elif cname == "gameplay_status_badges.png":
+            out_dir = os.path.join(SPRITES_DIR, "ui")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            names = [
+                "badge_armor.png", "badge_poison.png", "badge_slow.png",
+                "badge_flying.png", "badge_boss.png", "badge_plant_ring.png",
+            ]
+            for c_rgba, bname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, bname), size=96, anchor="center")
         else:
             print(f"WARNING: Unhandled file {raw_name} -> {cname}")
             continue

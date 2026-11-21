@@ -146,3 +146,40 @@ Quy ước tên file: `<id>_<anim>.png` (VD: `tieu_yeu_walk.png`, `oni_lon_attac
 | **P2** | `items_gems_currency` | Ngọc & Tiền tệ nâng cấp | 6 icon (`item_*`) | [x] |
 | **P2** | `items_skills_buffs` | Kỹ năng chủ động & Buff | 6 icon (`skill_*`) | [x] |
 | **P2** | `items_garden_upgrades` | Báu vật nâng cấp vườn | 6 icon (`upg_*`) | [x] |
+
+### J. Lớp Bối Cảnh Sống Động & Công Trình Theo Chương (`assets/sprites/environments/`)
+| Ưu tiên | ID | Tên Việt | Chi tiết | Trạng thái |
+| :---: | :--- | :--- | :--- | :---: |
+| **P1/P2** | `env_top_borders_pack` | Viền trung cảnh trên Ch1–Ch4 | 4 dải lặp ngang (`env_border_top_ch1..ch4.png`) | [x] |
+| **P1/P2** | `env_lawn_borders_pack` | Viền chuyển tiếp sân & hàng rào tuyết Ch5 | `env_border_top_ch5`, `env_edge_*`, `env_path_stepping_stones` | [x] |
+| **P1/P2** | `env_chapter_houses_pack` | Nhà chính Edo theo Chương 2–5 | `house_ch2_teahouse` .. `house_ch5_snow_shrine` | [x] |
+| **P1/P2** | `env_chapter_gates_pack` | Cổng xuất hiện Yokai Chương 2–5 | `gate_ch2_bamboo` .. `gate_ch5_snow_torii` | [x] |
+| **P1/P2** | `env_biome_flora_pack` | Cây cối & tiểu cảnh theo mùa | 6 cụm thực vật 5 mùa (`flora_*`) | [x] |
+| **P2** | `env_atmosphere_pack` | Lớp khí quyển, sương mù & ánh sáng | Mây, sương tím, quầng đèn, tia nắng, đom đóm, gió tuyết (`env_atmo_*`) | [x] |
+
+### K. Nhân Vật Thủ Vườn, Biểu Tượng & HUD Mở Rộng (`assets/sprites/ui/`)
+| Ưu tiên | ID | Tên Việt | Chi tiết | Trạng thái |
+| :---: | :--- | :--- | :--- | :---: |
+| **P2** | `char_gardener_portraits` | Chân dung biểu cảm Thủ Vườn Nhí | 6 biểu cảm (`gardener_*`) | [x] |
+| **P2** | `ui_branding_icons_pack` | Biểu tượng tiêu đề, App, xoay ngang, Kitsune | `ui_title_plaque`, `ui_app_icon`, `ui_rotate_landscape`, `ui_kitsune_auto` | [x] |
+| **P2** | `ui_extended_hud_pack` | Khung kỹ năng, hộp thoại, sổ tay & nút mở rộng | `ui_skill_frame_*`, `ui_dialogue_box`, `ui_almanac_book`, `ui_btn_sound_muted`, `ui_btn_auto_collect` | [x] |
+
+### L. Hiệu Ứng Chiến Đấu Bổ Sung (`assets/sprites/fx/`)
+| Ưu tiên | ID | Tên Việt | Chi tiết | Trạng thái |
+| :---: | :--- | :--- | :--- | :---: |
+| **P1/P2** | `fx_thunder_strike` | Tia sét Cuộn Sấm Sét | 12 frames (`4×3`) | [x] |
+| **P1/P2** | `fx_frost_chime_wave` | Sóng âm Chuông Băng | 12 frames (`4×3`) | [x] |
+| **P0/P1** | `fx_ice_hit_splash` | Vỡ băng trúng đòn Cầu Băng | 12 frames (`4×3`) | [x] |
+| **P1** | `fx_miko_summon_circle` | Vòng tròn triệu hồi Miko Ma | 12 frames (`4×3`) | [x] |
+| **P1** | `fx_yuki_ice_breath` | Luồng hơi lạnh Yuki-onna | 12 frames (`4×3`) | [x] |
+| **P1** | `fx_armor_break` | Hiệu ứng vỡ giáp Samurai/Kappa | 12 frames (`4×3`) | [x] |
+
+### M. Hồ Cá Koi Động, Đạn Animation & Icon Trạng Thái (`tiles/`, `fx/`, `ui/`)
+| Ưu tiên | ID | Tên Việt | Chi tiết | Trạng thái |
+| :---: | :--- | :--- | :--- | :---: |
+| **P1** | `water_platforms_pack` | Lá sen, bè tre & vòng nước Hồ Koi | 6 sprites (`water_*`) | [x] |
+| **P1/P2** | `env_koi_water_anim` | Mặt nước Hồ Cá Koi chuyển động | 12 frames (`4×3`) | [x] |
+| **P0/P2** | `proj_sakura_petal_anim` | Đạn cánh hoa anh đào xoay | 6 frames (`3×2`) | [x] |
+| **P0/P2** | `proj_ice_orb_anim` | Đạn cầu băng nhấp nháy | 6 frames (`3×2`) | [x] |
+| **P0/P2** | `proj_dart_poison_anim` | Đạn tên tre & bọt độc animation | `proj_bamboo_dart_anim` (`3×1`) & `proj_poison_glob_anim` (`3×1`) | [x] |
+| **P1/P2** | `gameplay_status_badges` | Badge trạng thái & khung đặt ô | 6 icons (`badge_*`) | [x] |

@@ -314,6 +314,14 @@ func _should_trigger_action() -> bool:
 					if dx >= -20.0 and dx <= rng_px:
 						return true
 			return false
+		"gio_loc":
+			var wind_rng := float(_data.get("range_cells", 5.5)) * GameData.CELL_SIZE.x
+			for enemy in _battle.get_enemies_in_lane(row):
+				if is_instance_valid(enemy) and not enemy.is_dying():
+					var dx: float = enemy.position.x - position.x
+					if dx >= -16.0 and dx <= wind_rng:
+						return true
+			return false
 		_:
 			for enemy in _battle.get_enemies_in_lane(row):
 				if is_instance_valid(enemy) and not enemy.is_dying() and enemy.position.x >= position.x - 20.0:
@@ -391,23 +399,7 @@ func _execute_action_effect() -> void:
 						enemy.apply_poison(8.0, 3.0)
 		"gio_loc":
 			AudioManager.play_sfx("wind_gust", -4.0)
-			_battle.spawn_vfx(
-				"res://assets/sprites/fx/fx_wind_gust.png",
-				Vector2i(4, 3),
-				position + Vector2(86.0, -8.0),
-				16.0,
-				1.25,
-				0.0,
-				Vector2(260.0, 0.0)
-			)
-			for enemy in _battle.get_enemies_in_lane(row):
-				if is_instance_valid(enemy) and not enemy.is_dying() and enemy.position.x >= position.x - 16.0:
-					if enemy.is_flying:
-						enemy.ground_from_wind()
-						enemy.take_damage(180.0, true)
-					else:
-						enemy.take_damage(damage, false)
-					enemy.knockback(170.0)
+			_battle.spawn_projectile(position + Vector2(36.0, -8.0), row, "wind", damage)
 		"chua_lanh":
 			AudioManager.play_sfx("heal_chime", -5.0)
 			for ally in _battle.get_all_defenders():

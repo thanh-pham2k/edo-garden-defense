@@ -75,8 +75,56 @@ func _run_all_tests() -> void:
 	for lvl in game_data.LEVELS:
 		_assert(ResourceLoader.exists("res://assets/sprites/tiles/%s_0.png" % lvl["tile_primary"]), "Missing tile_primary for level %d" % lvl["id"])
 		_assert(ResourceLoader.exists(lvl["ambient_particle"]), "Missing ambient particle for level %d" % lvl["id"])
+		_assert(ResourceLoader.exists(lvl["top_border"]), "Missing top_border for level %d" % lvl["id"])
+		_assert(ResourceLoader.exists(lvl["lawn_edge"]), "Missing lawn_edge for level %d" % lvl["id"])
+		_assert(ResourceLoader.exists(lvl["house_tex"]), "Missing house_tex for level %d" % lvl["id"])
+		_assert(ResourceLoader.exists(lvl["gate_tex"]), "Missing gate_tex for level %d" % lvl["id"])
+		for fp in lvl["biome_flora"]:
+			_assert(ResourceLoader.exists(fp), "Missing biome_flora %s for level %d" % [fp, lvl["id"]])
 		for p_idx in range(4):
 			_assert(ResourceLoader.exists("res://assets/sprites/backgrounds/%s_%d.png" % [lvl["bg_stem"], p_idx]), "Missing background panel %d for level %d" % [p_idx, lvl["id"]])
+
+	for extra_path in [
+		"res://assets/sprites/environments/env_path_stepping_stones.png",
+		"res://assets/sprites/environments/env_atmo_clouds.png",
+		"res://assets/sprites/environments/env_atmo_mist.png",
+		"res://assets/sprites/environments/env_atmo_lantern_glow.png",
+		"res://assets/sprites/environments/env_atmo_sunbeam.png",
+		"res://assets/sprites/environments/env_atmo_fireflies.png",
+		"res://assets/sprites/environments/env_atmo_snow_wind.png",
+		"res://assets/sprites/ui/gardener_happy.png",
+		"res://assets/sprites/ui/gardener_alert.png",
+		"res://assets/sprites/ui/gardener_victory.png",
+		"res://assets/sprites/ui/gardener_worried.png",
+		"res://assets/sprites/ui/gardener_tutorial.png",
+		"res://assets/sprites/ui/ui_kitsune_auto.png",
+		"res://assets/sprites/ui/ui_rotate_landscape.png",
+		"res://assets/sprites/ui/ui_btn_sound_muted.png",
+		"res://assets/sprites/ui/ui_btn_auto_collect.png",
+		"res://assets/sprites/ui/ui_skill_frame_ready.png",
+		"res://assets/sprites/ui/ui_skill_frame_cooldown.png",
+		"res://assets/sprites/ui/badge_armor.png",
+		"res://assets/sprites/ui/badge_poison.png",
+		"res://assets/sprites/ui/badge_slow.png",
+		"res://assets/sprites/ui/badge_flying.png",
+		"res://assets/sprites/ui/badge_boss.png",
+		"res://assets/sprites/ui/badge_plant_ring.png",
+		"res://assets/sprites/fx/fx_thunder_strike.png",
+		"res://assets/sprites/fx/fx_frost_chime_wave.png",
+		"res://assets/sprites/fx/fx_ice_hit_splash.png",
+		"res://assets/sprites/fx/fx_miko_summon_circle.png",
+		"res://assets/sprites/fx/fx_yuki_ice_breath.png",
+		"res://assets/sprites/fx/fx_armor_break.png",
+		"res://assets/sprites/fx/proj_sakura_petal_anim.png",
+		"res://assets/sprites/fx/proj_ice_orb_anim.png",
+		"res://assets/sprites/fx/proj_bamboo_dart_anim.png",
+		"res://assets/sprites/fx/proj_poison_glob_anim.png",
+		"res://assets/sprites/tiles/env_koi_water_anim.png",
+		"res://assets/sprites/tiles/water_lily_pad.png",
+		"res://assets/sprites/tiles/water_lily_lotus.png",
+		"res://assets/sprites/tiles/water_splash_ring.png",
+	]:
+		_assert(ResourceLoader.exists(extra_path), "Missing adapted sprite " + extra_path)
 
 	# 2. Test MainMenu instantiation & deck toggling
 	var menu_scene := load("res://scenes/main/MainMenu.tscn") as PackedScene
@@ -165,11 +213,36 @@ func _run_all_tests() -> void:
 	d_heal._execute_action_effect()
 	_assert(d_bi.hp > damaged_hp and d_bi.frozen_timer == 0.0, "Chữa Lành heals ally and cleanses freeze")
 
-	# Test Gió Lốc anti-air vs Tengu
+	# Test Gió Lốc anti-air vs Tengu (travelling wind wave + smooth slide + Boss knockback resistance)
 	var tengu = battle.spawn_enemy("tengu", 4, 520.0)
 	_assert(tengu.is_flying, "Tengu starts flying")
 	d_wind._execute_action_effect()
+	var wind_proj = null
+	for child in battle._projectile_layer.get_children():
+		if child.get("kind") == "wind":
+			wind_proj = child
+	_assert(wind_proj != null, "Gió Lốc spawns piercing wind projectile")
+	if wind_proj != null:
+		for _w in range(12):
+			wind_proj._process(0.05)
+			if not tengu.is_flying:
+				break
 	_assert(not tengu.is_flying and tengu.hp < 250.0, "Gió Lốc grounds flying Tengu and deals anti-air damage")
+	_assert(tengu._kb_remaining > 0.0 and is_equal_approx(tengu.position.x, 520.0), "Wind hit queues smooth slide instead of 1-frame teleport")
+	for _k in range(12):
+		tengu._process(0.05)
+	_assert(tengu.position.x > 610.0 and tengu.position.x <= 645.0 and is_equal_approx(tengu._kb_remaining, 0.0), "Tengu finishes smooth wind slide cleanly")
+
+	var boss_kb = battle.spawn_enemy("oni_lon", 4, 860.0)
+	boss_kb.knockback(115.0)
+	_assert(boss_kb._kb_remaining > 20.0 and boss_kb._kb_remaining <= 32.0 and boss_kb._kb_cooldown >= 7.5, "Boss applies reduced knockback with immunity cooldown")
+	var kb_before: float = boss_kb._kb_remaining
+	boss_kb.knockback(115.0)
+	_assert(is_equal_approx(boss_kb._kb_remaining, kb_before), "Boss knockback immunity blocks repeated stacking")
+	for _bk in range(10):
+		boss_kb._process(0.05)
+	_assert(boss_kb.position.x > 875.0 and boss_kb.position.x <= 895.0 and is_equal_approx(boss_kb._kb_remaining, 0.0), "Boss completes short knockback slide and resumes march")
+	boss_kb.queue_free()
 
 	# Test Phù Chú stun trigger
 	var tieu = battle.spawn_enemy("tieu_yeu", 4, game_data.cell_to_world(4, 4).x + 15.0)
