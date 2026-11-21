@@ -99,7 +99,8 @@ func _run_all_tests() -> void:
 				var source_rect := Rect2(Vector2.ZERO, texture.get_size())
 				_assert(source_rect.has_point(Vector2(contact.x, contact.y)) and contact.z > 0.0 and contact.z <= texture.get_width(),
 					"Invalid scenery contact or visible width for %s" % scenery_path)
-		for p_idx in range(4):
+		# The battlefield uses panel 0 and the chapter menu uses panel 2.
+		for p_idx in [0, 2]:
 			_assert(ResourceLoader.exists("res://assets/sprites/backgrounds/%s_%d.png" % [lvl["bg_stem"], p_idx]), "Missing background panel %d for level %d" % [p_idx, lvl["id"]])
 
 	for extra_path in [

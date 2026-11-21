@@ -9,7 +9,7 @@
 
 1. **`inbox/`**: Nơi nhận toàn bộ file raw / sprite sheet / icon mới do agent tạo asset sinh ra.
 2. **`assets/sprites/`**: Nơi lưu các asset đã được chuẩn hóa (xóa nền chuẩn PNG transparent, đúng kích thước ô, cắt/đóng gói sprite sheet đều frame, đặt tên chuẩn `snake_case`) để Godot 4 nạp trực tiếp.
-3. **`archive/`**: Sau khi adapt xong từ `inbox/` vào `assets/sprites/`, file gốc trong `inbox/` sẽ được di chuyển sang `archive/` (giữ nguyên hoặc thêm hậu tố ngày) để lưu vết và giữ `inbox/` luôn gọn sạch.
+3. **`archive/`**: Tạm giữ file gốc đã chuyển từ `inbox/` trong lúc kiểm tra bản tích hợp. Khi bản đã adapt được kiểm chứng trong Godot, các PNG nguồn trùng lặp có thể được dọn khỏi repo. Prompt đã dùng lưu ở [archive/asset_prompts](../archive/asset_prompts/). Các PNG nguồn đã dọn có thể lấy lại từ lịch sử Git, ví dụ ở commit `0197464`.
 
 ---
 
@@ -94,7 +94,7 @@ Quy ước tên file: `<id>_<anim>.png` (VD: `tieu_yeu_walk.png`, `oni_lon_attac
 | Ưu tiên | ID | Tên Việt | Vai trò | Trạng thái |
 | :---: | :--- | :--- | :--- | :---: |
 | **P0** | `prop_edo_house` | Nhà gỗ Edo | Nhà chính cần bảo vệ bên trái | [x] |
-| **P0** | `prop_komainu` | Tượng sư tử đá Komainu | Phòng tuyến cuối cùng mỗi hàng | [x] |
+| **P0** | `prop_komainu_dash` | Tượng sư tử đá Komainu | Phòng tuyến cuối cùng mỗi hàng | [x] |
 | **P0** | `prop_torii` | Cổng Torii đỏ | Điểm xuất hiện Yokai bên phải | [x] |
 | **P0** | `prop_sakura_tree` | Cây anh đào lớn | Trang trí rìa sân | [x] |
 | **P1** | `prop_lantern` | Đèn đá trang trí | Trang trí lối đi | [x] |
@@ -151,7 +151,7 @@ Quy ước tên file: `<id>_<anim>.png` (VD: `tieu_yeu_walk.png`, `oni_lon_attac
 | Ưu tiên | ID | Tên Việt | Chi tiết | Trạng thái |
 | :---: | :--- | :--- | :--- | :---: |
 | **P1/P2** | `env_top_borders_pack` | Viền trung cảnh trên Ch1–Ch4 | 4 dải lặp ngang (`env_border_top_ch1..ch4.png`) | [x] |
-| **P1/P2** | `env_lawn_borders_pack` | Viền chuyển tiếp sân & hàng rào tuyết Ch5 | `env_border_top_ch5`, `env_edge_*`, `env_path_stepping_stones` | [x] |
+| **P1/P2** | `env_lawn_borders_pack` | Viền chuyển tiếp sân & hàng rào tuyết Ch5 | `env_border_top_ch5_wide`, `env_edge_*`, `env_path_stepping_stones` | [x] |
 | **P1/P2** | `env_chapter_houses_pack` | Nhà chính Edo theo Chương 2–5 | `house_ch2_teahouse` .. `house_ch5_snow_shrine` | [x] |
 | **P1/P2** | `env_chapter_gates_pack` | Cổng xuất hiện Yokai Chương 2–5 | `gate_ch2_bamboo` .. `gate_ch5_snow_torii` | [x] |
 | **P1/P2** | `env_biome_flora_pack` | Cây cối & tiểu cảnh theo mùa | 6 cụm thực vật 5 mùa (`flora_*`) | [x] |
