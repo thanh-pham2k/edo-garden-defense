@@ -2,22 +2,22 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bu1n6wat2d844"
-path="res://.godot/imported/bg_ch4_misty_castle_2.png-c8055e48ae22ad532439b9c8af9a5deb.ctex"
+uid="uid://dpoaiqrkhw6xo"
+path="res://.godot/imported/den_soi_yeu_idle.png-e521a4a36c1d07fef8ce3222f2ba9491.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/sprites/backgrounds/bg_ch4_misty_castle_2.png"
-dest_files=["res://.godot/imported/bg_ch4_misty_castle_2.png-c8055e48ae22ad532439b9c8af9a5deb.ctex"]
+source_file="res://assets/sprites/defenders/den_soi_yeu_idle.png"
+dest_files=["res://.godot/imported/den_soi_yeu_idle.png-e521a4a36c1d07fef8ce3222f2ba9491.ctex"]
 
 [params]
 
 compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.9
+compress/lossy_quality=0.77
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

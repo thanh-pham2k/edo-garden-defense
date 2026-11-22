@@ -5,15 +5,22 @@ extends Control
 const SAFE_AREA := preload("res://scripts/ui/safe_area.gd")
 const BATTLE_SCENE_PATH := "res://scenes/battle/BattleScene.tscn"
 
-var _level_buttons: Array[Button] = []
+var _stage_picker: OptionButton
+var _category_sections: Array[VBoxContainer] = []
+var _previous_button: Button
+var _stage_view: SubViewport
+var _stage_thumbnail: TextureRect
+var _enemy_grid: GridContainer
+var _enemy_detail: Label
+var _preview_level := 0
 var _deck_buttons: Dictionary = {}
 var _upgrade_buttons: Dictionary = {}
 var _deck_count_label: Label
 var _jade_label: Label
-var _selected_level_label: Label
+var _stage_description: Label
+var _stage_conditions: Label
 var _info_desc_label: Label
 var _auto_collect_btn: Button
-var _auto_play_btn: Button
 var _sound_btn: TextureButton
 var _audio_menu: PopupMenu
 var _bg_preview_rect: TextureRect
@@ -141,14 +148,14 @@ func _build_ui() -> void:
 	title_text_v.add_child(title_lbl)
 
 	var sub_lbl := Label.new()
-	sub_lbl.text = "Bách Quỷ Dạ Hành — Bảo vệ Linh Hỏa & Khu Vườn Làng Hoa Anh Đào"
+	sub_lbl.text = "Bảo vệ khu vườn qua 24 màn"
 	sub_lbl.add_theme_font_size_override("font_size", 14)
 	sub_lbl.add_theme_color_override("font_color", Color(0.32, 0.22, 0.12))
 	title_text_v.add_child(sub_lbl)
 
 	# Jade Magatama currency pill
 	var jade_pill := _make_washi_panel(Color(0.98, 0.94, 0.82, 0.96), Color(0.24, 0.56, 0.30, 1.0))
-	jade_pill.custom_minimum_size = Vector2(128, 54)
+	jade_pill.custom_minimum_size = Vector2(82, 45)
 	jade_pill.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	header.add_child(jade_pill)
 
@@ -172,24 +179,13 @@ func _build_ui() -> void:
 
 	# Auto-collect toggle
 	_auto_collect_btn = Button.new()
-	_auto_collect_btn.custom_minimum_size = Vector2(198, 54)
+	_auto_collect_btn.custom_minimum_size = Vector2(153, 45)
 	_auto_collect_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_auto_collect_btn.add_theme_font_size_override("font_size", 13)
 	_auto_collect_btn.icon = load("res://assets/sprites/ui/ui_btn_auto_collect.png") as Texture2D
 	_auto_collect_btn.expand_icon = true
 	_auto_collect_btn.pressed.connect(_on_toggle_auto_collect)
 	header.add_child(_auto_collect_btn)
-
-	# Auto-play 5x (10m) toggle
-	_auto_play_btn = Button.new()
-	_auto_play_btn.custom_minimum_size = Vector2(182, 54)
-	_auto_play_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_auto_play_btn.add_theme_font_size_override("font_size", 13)
-	_auto_play_btn.icon = load("res://assets/sprites/ui/ui_kitsune_auto.png") as Texture2D
-	_auto_play_btn.expand_icon = true
-	_auto_play_btn.tooltip_text = "Bật/Tắt chế độ Tự Chơi 5x trong 10 phút"
-	_auto_play_btn.pressed.connect(_on_toggle_auto_play)
-	header.add_child(_auto_play_btn)
 
 	# Sound button
 	_sound_btn = TextureButton.new()
@@ -210,156 +206,19 @@ func _build_ui() -> void:
 	_audio_menu.id_pressed.connect(_on_audio_menu_selected)
 	add_child(_audio_menu)
 
-	# 4. Main Content Columns (Left: Chapters, Right: Deck Picker & Play)
 	var content := HBoxContainer.new()
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation", 18)
+	content.add_theme_constant_override("separation", 14)
 	vbox.add_child(content)
+	_build_roster(content)
+	_build_stage_brief(content)
 
-	# Left Column: 5 Campaign Chapters
-	var left_panel := _make_washi_panel(Color(0.97, 0.91, 0.78, 0.94), Color(0.50, 0.28, 0.10, 1.0))
-	left_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left_panel.size_flags_stretch_ratio = 1.05
-	content.add_child(left_panel)
-
-	var left_v := VBoxContainer.new()
-	left_v.add_theme_constant_override("separation", 8)
-	left_panel.add_child(left_v)
-
-	var ch_top := HBoxContainer.new()
-	left_v.add_child(ch_top)
-
-	var ch_title := Label.new()
-	ch_title.text = "CHỌN MÀN CHIẾN DỊCH (%d MÀN)" % GameData.LEVELS.size()
-	ch_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ch_title.add_theme_font_size_override("font_size", 18)
-	ch_title.add_theme_color_override("font_color", Color(0.36, 0.14, 0.08))
-	ch_top.add_child(ch_title)
-
-	var unlock_btn := Button.new()
-	unlock_btn.text = "Mở khóa hết"
-	unlock_btn.add_theme_font_size_override("font_size", 12)
-	unlock_btn.tooltip_text = "Mở khóa toàn bộ %d màn để chơi thử ngay" % GameData.LEVELS.size()
-	unlock_btn.pressed.connect(_on_unlock_all)
-	ch_top.add_child(unlock_btn)
-
-	var ch_scroll := ScrollContainer.new()
-	ch_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	ch_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	left_v.add_child(ch_scroll)
-
-	var ch_list := VBoxContainer.new()
-	ch_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ch_list.add_theme_constant_override("separation", 6)
-	ch_scroll.add_child(ch_list)
-
-	for lvl in GameData.LEVELS:
-		var lid := int(lvl["id"])
-		var btn := _create_level_row(lvl)
-		btn.pressed.connect(_on_select_level.bind(lid))
-		ch_list.add_child(btn)
-		_level_buttons.append(btn)
-
-	# Right Column: Defender Deck Picker (14 Defenders -> pick up to 8)
-	var right_panel := _make_washi_panel(Color(0.97, 0.91, 0.78, 0.94), Color(0.50, 0.28, 0.10, 1.0))
-	right_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_panel.size_flags_stretch_ratio = 1.15
-	content.add_child(right_panel)
-
-	var right_v := VBoxContainer.new()
-	right_v.add_theme_constant_override("separation", 8)
-	right_panel.add_child(right_v)
-
-	var deck_hdr := HBoxContainer.new()
-	right_v.add_child(deck_hdr)
-
-	var deck_title := Label.new()
-	deck_title.text = "ĐỘI HÌNH QUÂN PHÒNG THỦ"
-	deck_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	deck_title.add_theme_font_size_override("font_size", 18)
-	deck_title.add_theme_color_override("font_color", Color(0.36, 0.14, 0.08))
-	deck_hdr.add_child(deck_title)
-
-	_deck_count_label = Label.new()
-	_deck_count_label.add_theme_font_size_override("font_size", 15)
-	_deck_count_label.add_theme_color_override("font_color", Color(0.14, 0.45, 0.20))
-	deck_hdr.add_child(_deck_count_label)
-
-	var grid := GridContainer.new()
-	grid.columns = 7
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
-	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right_v.add_child(grid)
-
-	for did in GameData.DEFENDER_ORDER:
-		var d_btn := _create_defender_picker_btn(did)
-		grid.add_child(d_btn)
-		_deck_buttons[did] = d_btn
-
-	# Garden Upgrade Relics strip (6 items from 09_items_upgrades)
-	var upg_hdr := Label.new()
-	upg_hdr.text = "BÁU VẬT NÂNG CẤP VƯỜN (5 Ngọc / Báu Vật)"
-	upg_hdr.add_theme_font_size_override("font_size", 13)
-	upg_hdr.add_theme_color_override("font_color", Color(0.36, 0.14, 0.08))
-	right_v.add_child(upg_hdr)
-
-	var upg_row := HBoxContainer.new()
-	upg_row.add_theme_constant_override("separation", 6)
-	right_v.add_child(upg_row)
-
-	for uid in GameData.UPGRADE_ORDER:
-		var u_btn := _create_upgrade_btn(uid)
-		upg_row.add_child(u_btn)
-		_upgrade_buttons[uid] = u_btn
-
-	# Unit detail tooltip & Selected Chapter + Play button
-	_info_desc_label = Label.new()
-	_info_desc_label.text = "Chạm vào quân bất kỳ để thêm/bớt khỏi đội hình (tối đa 8 thẻ)."
-	_info_desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_info_desc_label.custom_minimum_size = Vector2(0, 38)
-	_info_desc_label.add_theme_font_size_override("font_size", 13)
-	_info_desc_label.add_theme_color_override("font_color", Color(0.28, 0.16, 0.08))
-	right_v.add_child(_info_desc_label)
-
-	var bottom_action := HBoxContainer.new()
-	bottom_action.add_theme_constant_override("separation", 12)
-	right_v.add_child(bottom_action)
-
-	_selected_level_label = Label.new()
-	_selected_level_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_selected_level_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_selected_level_label.add_theme_font_size_override("font_size", 15)
-	_selected_level_label.add_theme_color_override("font_color", Color(0.45, 0.14, 0.08))
-	bottom_action.add_child(_selected_level_label)
-
-	var play_wrap := TextureButton.new()
-	play_wrap.texture_normal = load("res://assets/sprites/ui/ui_btn_action_green.png") as Texture2D
-	play_wrap.custom_minimum_size = Vector2(220, 68)
-	play_wrap.ignore_texture_size = true
-	play_wrap.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
-	play_wrap.pressed.connect(_on_start_battle)
-	bottom_action.add_child(play_wrap)
-
-	var play_lbl := Label.new()
-	play_lbl.text = "VÀO TRẬN!"
-	play_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
-	play_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	play_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	play_lbl.add_theme_font_size_override("font_size", 22)
-	play_lbl.add_theme_color_override("font_color", Color.WHITE)
-	play_lbl.add_theme_color_override("font_shadow_color", Color(0.08, 0.24, 0.05, 0.9))
-	play_lbl.add_theme_constant_override("shadow_offset_y", 2)
-	play_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	play_wrap.add_child(play_lbl)
-
-	# 5. Footer controls tip
 	var footer := Label.new()
-	footer.text = "Điều khiển: Web (Click hoặc phím 1–8 đặt quân • X: Xẻng • Tab: 1x/2x/5x • A: Tự chơi 5x • Space: Tạm dừng)  |  Điện thoại (Chạm/Kéo thẻ thả ô • Vuốt nhặt Linh Hỏa)"
+	footer.text = "Trong trận: 1–8 chọn thẻ  ·  X xẻng  ·  Tab đổi tốc độ  ·  Space tạm dừng"
 	footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	footer.add_theme_font_size_override("font_size", 13)
-	footer.add_theme_color_override("font_color", Color(0.98, 0.95, 0.88))
-	footer.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.65))
+	footer.add_theme_font_size_override("font_size", 12)
+	footer.add_theme_color_override("font_color", Color("#ffedcf"))
+	footer.add_theme_color_override("font_shadow_color", Color("#261822"))
 	footer.add_theme_constant_override("shadow_offset_y", 1)
 	vbox.add_child(footer)
 
@@ -383,164 +242,319 @@ func _make_washi_panel(bg_col: Color, border_col: Color) -> PanelContainer:
 	return p
 
 
-func _create_level_row(lvl: Dictionary) -> Button:
-	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(0, 74)
-	btn.size_flags_vertical = Control.SIZE_EXPAND_FILL
+func _build_roster(content: HBoxContainer) -> void:
+	var panel := _make_washi_panel(Color("#f8eedced"), Color("#866347"))
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_stretch_ratio = 1.58
+	content.add_child(panel)
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 7)
+	panel.add_child(body)
 
-	var h := HBoxContainer.new()
-	h.set_anchors_preset(Control.PRESET_FULL_RECT)
-	h.add_theme_constant_override("separation", 10)
-	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(h)
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 10)
+	body.add_child(header)
+	var title := _menu_label("Chọn đội hình", 22, Color("#39272a"))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	_deck_count_label = _menu_label("", 14, Color("#34544e"))
+	header.add_child(_deck_count_label)
+	var filter := OptionButton.new()
+	_style_paper_button(filter)
+	filter.tooltip_text = "Lọc theo vai trò"
+	filter.add_item("Tất cả nhóm")
+	for category in GameData.DEFENDER_CATEGORIES:
+		filter.add_item(category["name"])
+	filter.item_selected.connect(_filter_categories)
+	header.add_child(filter)
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(margin)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.follow_focus = true
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	body.add_child(scroll)
+	var roster := VBoxContainer.new()
+	roster.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	roster.add_theme_constant_override("separation", 4)
+	scroll.add_child(roster)
+	for category in GameData.DEFENDER_CATEGORIES:
+		var section := VBoxContainer.new()
+		section.add_theme_constant_override("separation", 2)
+		roster.add_child(section)
+		_category_sections.append(section)
+		var color: Color = category["color"]
+		section.add_child(_menu_label(category["name"], 14, color.darkened(0.35)))
+		var row := GridContainer.new()
+		row.columns = 5
+		row.add_theme_constant_override("h_separation", 7)
+		row.add_theme_constant_override("v_separation", 4)
+		section.add_child(row)
+		for did: String in category["members"]:
+			var card := _create_defender_picker_btn(did, color)
+			row.add_child(card)
+			_deck_buttons[did] = card
 
-	var row_h := HBoxContainer.new()
-	row_h.add_theme_constant_override("separation", 10)
-	row_h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_child(row_h)
+	_info_desc_label = _menu_label("Chọn tối đa 8 thẻ để mang vào trận.", 13, Color("#483831"))
+	_info_desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_info_desc_label.custom_minimum_size.y = 36
+	body.add_child(_info_desc_label)
 
-	var node_icon := TextureRect.new()
-	node_icon.name = "NodeIcon"
-	node_icon.custom_minimum_size = Vector2(48, 48)
-	node_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	node_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	node_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row_h.add_child(node_icon)
-
-	var tile_prev := TextureRect.new()
-	if int(lvl["water_lane"]) >= 0:
-		tile_prev.texture = preload("res://assets/sprites/tiles/tile_koi_water_2.png")
-	else:
-		tile_prev.texture = load("res://assets/sprites/tiles/%s_%d.png" % [lvl["tile_primary"], lvl["terrain_variants"].x]) as Texture2D
-	tile_prev.custom_minimum_size = Vector2(44, 44)
-	tile_prev.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	tile_prev.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	tile_prev.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	tile_prev.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row_h.add_child(tile_prev)
-
-	var txt_v := VBoxContainer.new()
-	txt_v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	txt_v.alignment = BoxContainer.ALIGNMENT_CENTER
-	txt_v.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row_h.add_child(txt_v)
-
-	var t1 := Label.new()
-	t1.name = "Title"
-	t1.text = lvl["name"]
-	t1.add_theme_font_size_override("font_size", 15)
-	t1.add_theme_color_override("font_color", Color(0.24, 0.12, 0.05))
-	t1.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	txt_v.add_child(t1)
-
-	var t2 := Label.new()
-	t2.text = lvl["subtitle"]
-	t2.add_theme_font_size_override("font_size", 12)
-	t2.add_theme_color_override("font_color", Color(0.42, 0.28, 0.16))
-	t2.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	txt_v.add_child(t2)
-
-	var stars_h := HBoxContainer.new()
-	stars_h.name = "Stars"
-	stars_h.add_theme_constant_override("separation", 2)
-	stars_h.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	stars_h.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row_h.add_child(stars_h)
-	for s in range(3):
-		var st := TextureRect.new()
-		st.custom_minimum_size = Vector2(22, 22)
-		st.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		st.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		st.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		stars_h.add_child(st)
-
-	return btn
+	var footer := HBoxContainer.new()
+	footer.add_theme_constant_override("separation", 9)
+	body.add_child(footer)
+	_previous_button = Button.new()
+	_style_paper_button(_previous_button)
+	_previous_button.text = "Dùng đội hình trước"
+	_previous_button.tooltip_text = "Khôi phục các thẻ từ trận chơi gần nhất"
+	_previous_button.pressed.connect(_reuse_deck)
+	footer.add_child(_previous_button)
+	var upg_row := HBoxContainer.new()
+	upg_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	upg_row.alignment = BoxContainer.ALIGNMENT_END
+	upg_row.add_theme_constant_override("separation", 5)
+	footer.add_child(upg_row)
+	for uid in GameData.UPGRADE_ORDER:
+		var button := _create_upgrade_btn(uid)
+		upg_row.add_child(button)
+		_upgrade_buttons[uid] = button
 
 
-func _create_defender_picker_btn(did: String) -> Button:
+func _filter_categories(index: int) -> void:
+	for i in _category_sections.size():
+		_category_sections[i].visible = index == 0 or index == i + 1
+
+
+func _reuse_deck() -> void:
+	if GameData.reuse_previous_deck():
+		_info_desc_label.text = "Đã khôi phục đội hình của trận trước."
+		_refresh_ui()
+
+
+func _build_stage_brief(content: HBoxContainer) -> void:
+	var panel := _make_washi_panel(Color("#f5e9d6f2"), Color("#866347"))
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.custom_minimum_size.x = 318.0
+	content.add_child(panel)
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 7)
+	panel.add_child(body)
+
+	var header := HBoxContainer.new()
+	body.add_child(header)
+	var title := _menu_label("Chiến địa", 22, Color("#39272a"))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var unlock := Button.new()
+	_style_paper_button(unlock)
+	unlock.text = "Mở khóa hết"
+	unlock.tooltip_text = "Mở khóa 24 màn để chơi thử"
+	unlock.pressed.connect(_on_unlock_all)
+	header.add_child(unlock)
+
+	_stage_picker = OptionButton.new()
+	_style_paper_button(_stage_picker)
+	_stage_picker.fit_to_longest_item = false
+	_stage_picker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	for stage in GameData.LEVELS:
+		_stage_picker.add_item(stage["name"], stage["id"])
+	_stage_picker.item_selected.connect(func(index: int): _on_select_level(_stage_picker.get_item_id(index)))
+	body.add_child(_stage_picker)
+
+	_stage_view = SubViewport.new()
+	_stage_view.size = Vector2i(640, 360)
+	_stage_view.world_2d = World2D.new()
+	_stage_view.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	add_child(_stage_view)
+	_stage_thumbnail = TextureRect.new()
+	_stage_thumbnail.custom_minimum_size.y = 200
+	_stage_thumbnail.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_stage_thumbnail.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_stage_thumbnail.texture = _stage_view.get_texture()
+	body.add_child(_stage_thumbnail)
+	_bg_preview_rect.texture = _stage_view.get_texture()
+	_bg_preview_rect.modulate = Color(0.62, 0.56, 0.63, 1.0)
+
+	_stage_description = _menu_label("", 13, Color("#372828"))
+	_stage_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(_stage_description)
+	_stage_conditions = _menu_label("", 12, Color("#663e31"))
+	_stage_conditions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(_stage_conditions)
+	body.add_child(_menu_label("Yokai xuất hiện", 14, Color("#39272a")))
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.follow_focus = true
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	body.add_child(scroll)
+	_enemy_grid = GridContainer.new()
+	_enemy_grid.columns = 6
+	_enemy_grid.add_theme_constant_override("h_separation", 4)
+	_enemy_grid.add_theme_constant_override("v_separation", 4)
+	scroll.add_child(_enemy_grid)
+	_enemy_detail = _menu_label("", 13, Color("#60382d"))
+	_enemy_detail.custom_minimum_size.y = 20
+	body.add_child(_enemy_detail)
+	var play := Button.new()
+	play.text = "Vào trận"
+	play.custom_minimum_size.y = 43
+	play.add_theme_font_size_override("font_size", 19)
+	play.add_theme_stylebox_override("normal", _card_style(Color("#304c45"), Color("#5f8e76"), 1))
+	play.add_theme_stylebox_override("hover", _card_style(Color("#426452"), Color("#8db498"), 1))
+	play.add_theme_stylebox_override("pressed", _card_style(Color("#213d36"), Color("#8db498"), 1))
+	play.pressed.connect(_on_start_battle)
+	body.add_child(play)
+
+
+func _refresh_stage_brief(config: Dictionary) -> void:
+	if _preview_level == int(config["id"]):
+		return
+	_preview_level = int(config["id"])
+	for old in _stage_view.get_children():
+		_stage_view.remove_child(old)
+		old.queue_free()
+	var preview := (load(BATTLE_SCENE_PATH) as PackedScene).instantiate()
+	preview.stage_preview_id = _preview_level
+	_stage_view.add_child(preview)
+	_stage_view.render_target_update_mode = SubViewport.UPDATE_ONCE
+	_stage_description.text = config["subtitle"]
+	var details := PackedStringArray(["%d đợt" % config["waves"].size()])
+	if config.has("fog"):
+		details.append("Sương mù · nên mang đèn")
+	match config.get("layout", ""):
+		"twin_pond":
+			details.append("Hai làn nước · tự đặt bè sen")
+		"stone_island":
+			details.append("Đảo đá · ô nước sâu không đặt được")
+		_:
+			if not GameData.stage_water_rows(config).is_empty():
+				details.append("Làn nước · tự đặt bè sen")
+	_stage_conditions.text = "  ·  ".join(details)
+
+	for old in _enemy_grid.get_children():
+		_enemy_grid.remove_child(old)
+		old.queue_free()
+	_enemy_detail.text = ""
+	var enemies := {}
+	for wave in config["waves"]:
+		for id in wave["spawns"]:
+			enemies[id] = GameData.ENEMIES[id]
+	var ordered := enemies.keys()
+	ordered.sort_custom(func(a, b): return int(enemies[a]["is_boss"]) > int(enemies[b]["is_boss"]))
+	for key in ordered:
+		var info: Dictionary = enemies[key]
+		var boss := bool(info["is_boss"])
+		var name_text := str(info["name"])
+		var description := ("Boss · " if boss else "") + name_text
+		var icon := Button.new()
+		icon.icon = load(info["icon"]) as Texture2D
+		icon.expand_icon = true
+		icon.custom_minimum_size = Vector2(44.0, 42.0)
+		icon.tooltip_text = description
+		icon.add_theme_stylebox_override("normal", _card_style(Color("#fdf4e2"), Color("#ac643d") if boss else Color("#c7b498"), 2 if boss else 1))
+		icon.mouse_entered.connect(_show_enemy_detail.bind(description))
+		icon.focus_entered.connect(_show_enemy_detail.bind(description))
+		icon.pressed.connect(_show_enemy_detail.bind(description))
+		_enemy_grid.add_child(icon)
+
+
+func _show_enemy_detail(description: String) -> void:
+	_enemy_detail.text = description
+
+
+func _menu_label(text: String, font_size: int, color: Color) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return label
+
+
+func _card_style(color: Color, border: Color, width: int) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = color
+	style.border_color = border
+	style.set_corner_radius_all(7)
+	style.set_border_width_all(width)
+	return style
+
+
+func _style_paper_button(button: Button) -> void:
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var ink := Color("#513e36") if state != "disabled" else Color("#817365")
+		var paper := Color("#f8edd9") if state == "normal" else Color("#eedcc3")
+		var style := _card_style(paper, Color("#ad9175"), 1)
+		style.content_margin_left = 10.0
+		style.content_margin_right = 10.0
+		style.content_margin_top = 6.0
+		style.content_margin_bottom = 6.0
+		button.add_theme_stylebox_override(state, style)
+		button.add_theme_color_override("font_color" if state == "normal" else "font_%s_color" % state, ink)
+	button.add_theme_color_override("font_focus_color", Color("#513e36"))
+	button.add_theme_stylebox_override("focus", _card_style(Color.TRANSPARENT, Color("#614b40"), 2))
+
+
+func _create_defender_picker_btn(did: String, color: Color) -> Button:
 	var data: Dictionary = GameData.DEFENDERS[did]
 	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(96, 102)
+	var has_hint := data.has("card_hint")
+	btn.custom_minimum_size = Vector2(78, 74)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	btn.tooltip_text = "%s (%d) — %s" % [data["name"], int(data["cost"]), data["desc"]]
+	btn.tooltip_text = "%s · %d Linh Hỏa
+%s" % [data["name"], data["cost"], data["desc"]]
 	btn.pressed.connect(_on_toggle_defender.bind(did))
+	btn.mouse_entered.connect(_show_defender_detail.bind(did))
+	btn.focus_entered.connect(_show_defender_detail.bind(did))
+	btn.add_theme_stylebox_override("focus", _card_style(Color.TRANSPARENT, Color("#332231"), 2))
 
-	var bg := TextureRect.new()
-	bg.name = "CardBg"
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(bg)
-
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_top", 14)
-	margin.add_theme_constant_override("margin_bottom", 2)
-	margin.add_theme_constant_override("margin_left", 8)
-	margin.add_theme_constant_override("margin_right", 8)
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(margin)
-
-	var v := VBoxContainer.new()
-	v.alignment = BoxContainer.ALIGNMENT_CENTER
-	v.add_theme_constant_override("separation", 2)
-	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_child(v)
-
+	var column := VBoxContainer.new()
+	column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	column.offset_top = 4.0
+	column.offset_bottom = -7.0
+	column.add_theme_constant_override("separation", 0)
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(column)
 	var icon := TextureRect.new()
 	icon.texture = load(data["icon"]) as Texture2D
-	icon.custom_minimum_size = Vector2(38, 38)
+	icon.custom_minimum_size.y = 28.0
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(icon)
-
-	var nm := Label.new()
-	nm.text = data["name"]
-	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	nm.add_theme_font_size_override("font_size", 11)
-	nm.add_theme_color_override("font_color", Color(0.24, 0.12, 0.04))
-	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	v.add_child(nm)
-
-	var cost_lbl := Label.new()
-	cost_lbl.name = "CardCost"
-	cost_lbl.text = "%d" % int(data["cost"])
-	cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	cost_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	cost_lbl.add_theme_font_size_override("font_size", 11)
-	cost_lbl.add_theme_color_override("font_color", Color(0.18, 0.08, 0.02))
-	cost_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bg.add_child(cost_lbl)
-	bg.resized.connect(_position_card_cost.bind(bg, cost_lbl))
-
+	column.add_child(icon)
+	var name_label := _menu_label(data["name"], 11, Color("#33242a"))
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	column.add_child(name_label)
+	var cost_text := str(data["cost"])
+	if has_hint:
+		cost_text += " · " + str(data["card_hint"])
+	var cost := _menu_label(cost_text, 13, color.darkened(0.43))
+	cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(cost)
+	var selected := Control.new()
+	selected.name = "SelectedMark"
+	selected.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(selected)
+	selected.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	selected.position += Vector2(-21, 9)
+	var check := Line2D.new()
+	check.points = PackedVector2Array([Vector2(0, 4), Vector2(3, 7), Vector2(9, 0)])
+	check.width = 1.8
+	check.default_color = color.darkened(0.38)
+	check.antialiased = true
+	selected.add_child(check)
 	return btn
 
 
-func _position_card_cost(bg: TextureRect, cost: Label) -> void:
-	if bg.texture == null:
-		return
-	var texture_size := bg.texture.get_size()
-	var fit := minf(bg.size.x / texture_size.x, bg.size.y / texture_size.y)
-	var drawn_height := texture_size.y * fit
-	var plaque_y := 0.852 if bg.texture.resource_path.ends_with("_selected.png") else 0.91
-	cost.size = Vector2(bg.size.x, cost.get_combined_minimum_size().y)
-	cost.position.y = (bg.size.y - drawn_height) * 0.5 + drawn_height * plaque_y - cost.size.y * 0.5
+func _show_defender_detail(did: String) -> void:
+	var data: Dictionary = GameData.DEFENDERS[did]
+	_info_desc_label.text = "%s · %d Linh Hỏa — %s" % [data["name"], data["cost"], data["desc"]]
 
 
 func _create_upgrade_btn(uid: String) -> Button:
 	var data: Dictionary = GameData.GARDEN_UPGRADES[uid]
 	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(78, 62)
+	btn.custom_minimum_size = Vector2(56, 52)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.tooltip_text = "%s (%d Ngọc) — %s" % [data["name"], int(data["cost"]), data["desc"]]
 	btn.pressed.connect(_on_click_upgrade.bind(uid))
@@ -555,7 +569,7 @@ func _create_upgrade_btn(uid: String) -> Button:
 	var ic := TextureRect.new()
 	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	ic.custom_minimum_size = Vector2(34, 34)
+	ic.custom_minimum_size = Vector2(26, 26)
 	ic.texture = load(data["icon"]) as Texture2D
 	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(ic)
@@ -571,62 +585,21 @@ func _create_upgrade_btn(uid: String) -> Button:
 
 
 func _refresh_ui() -> void:
-	var tex_unlocked := load("res://assets/sprites/ui/ui_node_unlocked.png") as Texture2D
-	var tex_current := load("res://assets/sprites/ui/ui_node_current.png") as Texture2D
-	var tex_locked := load("res://assets/sprites/ui/ui_node_locked.png") as Texture2D
-	var tex_boss := load("res://assets/sprites/ui/ui_node_boss.png") as Texture2D
-	var tex_ch6_emblem := load("res://assets/sprites/ui/ui_ch6_emblem.png") as Texture2D
-	var tex_star_on := load("res://assets/sprites/ui/ui_star_earned.png") as Texture2D
-	var tex_star_off := load("res://assets/sprites/ui/ui_star_empty.png") as Texture2D
+	for index in _stage_picker.item_count:
+		_stage_picker.set_item_disabled(index, _stage_picker.get_item_id(index) > GameData.unlocked_level)
+	_stage_picker.select(_stage_picker.get_item_index(GameData.selected_level))
 
-	for i in range(_level_buttons.size()):
-		var lid := i + 1
-		var btn := _level_buttons[i]
-		var unlocked := lid <= GameData.unlocked_level
-		btn.disabled = not unlocked
-		var node_icon := btn.find_child("NodeIcon", true, false) as TextureRect
-		if not unlocked:
-			node_icon.texture = tex_locked
-		elif lid == GameData.LEVELS.size() and tex_ch6_emblem:
-			node_icon.texture = tex_ch6_emblem
-		elif lid == GameData.selected_level:
-			node_icon.texture = tex_current
-		elif lid % 3 == 0:
-			node_icon.texture = tex_boss
-		else:
-			node_icon.texture = tex_unlocked
-
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(0.98, 0.90, 0.62, 1.0) if lid == GameData.selected_level else Color(0.95, 0.89, 0.77, 0.9)
-		if not unlocked:
-			sb.bg_color = Color(0.75, 0.72, 0.68, 0.7)
-		sb.border_color = Color(0.84, 0.46, 0.10) if lid == GameData.selected_level else Color(0.62, 0.42, 0.24)
-		sb.set_border_width_all(3 if lid == GameData.selected_level else 2)
-		sb.set_corner_radius_all(8)
-		btn.add_theme_stylebox_override("normal", sb)
-		btn.add_theme_stylebox_override("hover", sb)
-		btn.add_theme_stylebox_override("pressed", sb)
-		btn.add_theme_stylebox_override("disabled", sb)
-
-		var stars_earned := int(GameData.level_stars.get(str(lid), 0))
-		var stars_box := btn.find_child("Stars", true, false)
-		for s in range(3):
-			var st := stars_box.get_child(s) as TextureRect
-			st.texture = tex_star_on if s < stars_earned else tex_star_off
-
-	var tex_card_sel := load("res://assets/sprites/ui/ui_card_selected.png") as Texture2D
-	var tex_card_off := load("res://assets/sprites/ui/ui_card_disabled.png") as Texture2D
-	for did in _deck_buttons.keys():
-		var d_btn: Button = _deck_buttons[did]
-		var in_deck := GameData.is_deck_member(did)
-		var bg := d_btn.find_child("CardBg", true, false) as TextureRect
-		bg.texture = tex_card_sel if in_deck else tex_card_off
-		_position_card_cost(bg, bg.get_node("CardCost") as Label)
-		d_btn.modulate = Color.WHITE if in_deck else Color(0.78, 0.78, 0.82, 0.92)
-		var empty_sb := StyleBoxEmpty.new()
-		d_btn.add_theme_stylebox_override("normal", empty_sb)
-		d_btn.add_theme_stylebox_override("hover", empty_sb)
-		d_btn.add_theme_stylebox_override("pressed", empty_sb)
+	for did in _deck_buttons:
+		var button: Button = _deck_buttons[did]
+		var active := GameData.is_deck_member(did)
+		button.get_node("SelectedMark").visible = active
+		var color: Color = GameData.defender_category(did)["color"]
+		var off := Color("#fff7e7").lerp(color, 0.10)
+		var on := Color("#fff1d9").lerp(color, 0.30)
+		button.add_theme_stylebox_override("normal", _card_style(on if active else off, color, 3 if active else 1))
+		button.add_theme_stylebox_override("hover", _card_style(on, color.darkened(0.22), 3))
+		button.add_theme_stylebox_override("pressed", _card_style(on, color.darkened(0.32), 3))
+	_previous_button.disabled = GameData.previous_deck.is_empty()
 
 	for uid in _upgrade_buttons.keys():
 		var u_btn: Button = _upgrade_buttons[uid]
@@ -653,12 +626,8 @@ func _refresh_ui() -> void:
 	if _jade_label:
 		_jade_label.text = str(GameData.jade_gems)
 	_deck_count_label.text = "Đã chọn: %d / %d" % [GameData.selected_deck.size(), GameData.MAX_DECK_SIZE]
-	var cur_lvl := GameData.get_level_config(GameData.selected_level)
-	_selected_level_label.text = "Đang chọn: %s (%d đợt)" % [cur_lvl["name"], cur_lvl["waves"].size()]
-	if _bg_preview_rect and cur_lvl.has("bg_stem"):
-		_bg_preview_rect.texture = load("res://assets/sprites/backgrounds/%s_2.png" % cur_lvl["bg_stem"]) as Texture2D
+	_refresh_stage_brief(GameData.get_level_config(GameData.selected_level))
 	_auto_collect_btn.text = "Hút Linh Hỏa: BẬT" if GameData.auto_collect_flame else "Hút Linh Hỏa: TẮT"
-	_update_auto_play_btn()
 	var sound_tex_path := "res://assets/sprites/ui/ui_btn_sound_muted.png" if GameData.sound_muted else "res://assets/sprites/ui/ui_btn_sound.png"
 	_sound_btn.texture_normal = load(sound_tex_path) as Texture2D
 	_sound_btn.modulate = Color.WHITE
@@ -709,32 +678,6 @@ func _on_toggle_auto_collect() -> void:
 	_refresh_ui()
 
 
-func _update_auto_play_btn() -> void:
-	if _auto_play_btn == null:
-		return
-	if GameData.auto_play_active:
-		var rem := int(ceil(GameData.get_auto_play_remaining_sec()))
-		@warning_ignore("integer_division")
-		var mins := rem / 60
-		var secs := rem % 60
-		_auto_play_btn.text = "TỰ CHƠI 5x: %02d:%02d" % [mins, secs]
-		_auto_play_btn.modulate = Color(0.65, 1.0, 0.68, 1.0)
-	else:
-		_auto_play_btn.text = "TỰ CHƠI 5x (10P)"
-		_auto_play_btn.modulate = Color.WHITE
-
-
-func _on_toggle_auto_play() -> void:
-	AudioManager.play_sfx("ui_click")
-	if GameData.auto_play_active:
-		GameData.stop_auto_play()
-		_refresh_ui()
-	else:
-		GameData.start_auto_play(600.0, 5.0)
-		_refresh_ui()
-		get_tree().create_timer(0.5, true, false, true).timeout.connect(_auto_enter_battle)
-
-
 func _auto_enter_battle() -> void:
 	if not is_inside_tree() or not GameData.auto_play_active:
 		return
@@ -763,6 +706,7 @@ func _on_audio_menu_selected(id: int) -> void:
 
 
 func _on_start_battle() -> void:
+	GameData.remember_battle_deck()
 	AudioManager.play_sfx("wave_horn", -5.0)
 	get_tree().change_scene_to_file(BATTLE_SCENE_PATH)
 
@@ -795,10 +739,8 @@ func _build_portrait_overlay() -> Control:
 
 
 func _process(delta: float) -> void:
-	if GameData.auto_play_active:
-		if GameData.get_auto_play_remaining_sec() <= 0.0:
-			GameData.stop_auto_play()
-		_update_auto_play_btn()
+	if GameData.auto_play_active and GameData.get_auto_play_remaining_sec() <= 0.0:
+		GameData.stop_auto_play()
 	var vp := get_viewport_rect().size
 	if _portrait_overlay:
 		_portrait_overlay.visible = vp.y > vp.x * 1.05

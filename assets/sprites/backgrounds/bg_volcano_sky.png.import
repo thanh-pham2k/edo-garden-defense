@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ddxysyp3bkdyb"
-path="res://.godot/imported/bg_ch3_koi_shrine_night_2.png-e2ce3dc4f8cc85bd1b6c7774cc706dc7.ctex"
+uid="uid://n0oq8kvrsggs"
+path="res://.godot/imported/bg_volcano_sky.png-faae71c06e36b9f990d0ffb7ab31d31a.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/sprites/backgrounds/bg_ch3_koi_shrine_night_2.png"
-dest_files=["res://.godot/imported/bg_ch3_koi_shrine_night_2.png-e2ce3dc4f8cc85bd1b6c7774cc706dc7.ctex"]
+source_file="res://assets/sprites/backgrounds/bg_volcano_sky.png"
+dest_files=["res://.godot/imported/bg_volcano_sky.png-faae71c06e36b9f990d0ffb7ab31d31a.ctex"]
 
 [params]
 

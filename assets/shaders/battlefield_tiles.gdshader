@@ -10,7 +10,13 @@ uniform vec2 grid_origin;
 uniform vec2 cell_size;
 uniform vec2 grid_size;
 uniform vec2 stage_size;
-uniform int water_lane = -1;
+uniform ivec2 water_rows = ivec2(-1);
+uniform ivec2 island_columns = ivec2(-1);
+uniform ivec2 deep_columns = ivec2(-1);
+uniform bool moon_water;
+uniform bool ember_ground;
+uniform bool ice_ground;
+uniform float lane_emphasis = 1.0;
 uniform float water_time;
 uniform float pond_bridge_x;
 
@@ -65,25 +71,63 @@ void fragment() {
 	rgb = mix(ground_tint.rgb, rgb, saturation_contrast.y);
 	rgb *= 0.96 + path_noise * 0.075 + detail * 0.035;
 
-	if (water_lane >= 0) {
-		float water_y = grid_origin.y + (float(water_lane) + 0.5) * cell_size.y;
+	if (water_rows.x >= 0) {
+		float water_y = grid_origin.y + (float(water_rows.x) + 0.5) * cell_size.y;
 		float west_bank_x = grid_origin.x - 41.0;
 		float east_bank_x = grid_origin.x + grid_size.x * cell_size.x + 152.0;
-		float pond = segment_distance(p, vec2(west_bank_x, water_y), vec2(east_bank_x, water_y)) - 46.0;
-		float inlet = segment_distance(p, vec2(pond_bridge_x, water_y - 77.0), vec2(pond_bridge_x, water_y)) - 24.0;
-		float join_water = segment_distance(p, vec2(pond_bridge_x, water_y), vec2(west_bank_x, water_y)) - 24.0;
-		float bank_distance = min(pond, min(inlet, join_water)) + 46.0;
+		float bank_distance = segment_distance(p, vec2(west_bank_x, water_y), vec2(east_bank_x, water_y));
+		if (water_rows.y >= 0) {
+			float second_y = grid_origin.y + (float(water_rows.y) + 0.5) * cell_size.y;
+			bank_distance = min(bank_distance, segment_distance(p, vec2(west_bank_x, second_y), vec2(east_bank_x, second_y)));
+		}
+		if (moon_water) {
+			float inlet = segment_distance(p, vec2(pond_bridge_x, water_y - 77.0), vec2(pond_bridge_x, water_y)) + 22.0;
+			float join_water = segment_distance(p, vec2(pond_bridge_x, water_y), vec2(west_bank_x, water_y)) + 22.0;
+			bank_distance = min(bank_distance, min(inlet, join_water));
+		}
 		float shore_shape = (value_noise(vec2(p.x / 51.0, 4.6)) - 0.5) * 7.0;
 		float bank = bank_distance + shore_shape;
-		float wet_ground = 1.0 - smoothstep(43.0, 60.0, bank);
+		float island = 0.0;
+		if (island_columns.x >= 0) {
+			float left = float(island_columns.x);
+			float right = float(island_columns.y);
+			island = smoothstep(left - 0.12, left + 0.12, board.x) * (1.0 - smoothstep(right - 0.12, right + 0.12, board.x));
+			rgb = mix(rgb, rgb * 0.87 + vec3(0.11, 0.09, 0.06), island * (1.0 - smoothstep(24.0, 42.0, bank)));
+		}
+		float wet_ground = (1.0 - smoothstep(43.0, 60.0, bank)) * (1.0 - island);
 		rgb *= 1.0 - 0.18 * wet_ground;
 		if (bank < 50.0) {
 			vec2 flow = vec2(water_time * 8.0, sin(p.x * 0.018 + water_time) * 3.5);
 			vec3 surface = texture(water_texture, mirrored_uv((p + warp + flow) / vec2(229.0, 115.0))).rgb;
 			vec3 water = mix(vec3(0.09, 0.24, 0.28), surface, 0.35);
 			water += vec3(0.14, 0.16, 0.14) * smoothstep(36.0, 48.0, bank);
-			rgb = mix(water, rgb, smoothstep(41.0, 49.0, bank));
+			if (deep_columns.x >= 0) {
+				float deep = min(abs(board.x - float(deep_columns.x) - 0.5), abs(board.x - float(deep_columns.y) - 0.5));
+				water *= mix(0.64, 1.0, smoothstep(0.26, 0.54, deep));
+			}
+			if (moon_water) {
+				float gleam = exp(-pow((p.x - stage_size.x * 0.67 + flow.y * 4.0) / 105.0, 2.0));
+				float ripples = smoothstep(0.48, 0.89, value_noise(p / vec2(43.0, 5.0) + vec2(water_time * 0.6, 0.0)));
+				water += vec3(0.25, 0.25, 0.16) * gleam * ripples;
+			}
+			rgb = mix(water, rgb, max(island, smoothstep(41.0, 49.0, bank)));
 		}
+	}
+
+	if (ember_ground) {
+		float apron_light = smoothstep(7.5, 10.6, board.x) * (0.31 + path_noise * 0.32);
+		rgb += vec3(0.15, 0.047, 0.017) * apron_light;
+	}
+
+	if (ice_ground) {
+		vec2 crystal = p / 45.0;
+		vec2 cell = floor(crystal);
+		float id = value_hash(cell);
+		vec2 offset = vec2(id, value_hash(cell + 17.0)) * 0.64 + 0.18;
+		vec2 ray = abs(fract(crystal) - offset);
+		float shape = 1.0 - smoothstep(0.017, 0.044, min(ray.x + ray.y * 2.9, ray.y + ray.x * 2.9));
+		float twinkle = smoothstep(0.94, 0.998, sin(id * 31.4 + TIME * 1.15));
+		rgb += vec3(0.16, 0.22, 0.24) * shape * twinkle;
 	}
 
 	if (all(greaterThanEqual(board, vec2(0.0))) && all(lessThanEqual(board, grid_size))) {
@@ -91,7 +135,7 @@ void fragment() {
 		vec2 edge = abs(fract(board + vec2(0.5)) - 0.5) * cell_size;
 		float lane_edge = 1.0 - smoothstep(0.0, 2.4, edge.y);
 		float corner = (1.0 - smoothstep(0.0, 1.8, edge.x)) * (1.0 - smoothstep(2.0, 8.0, edge.y));
-		rgb = mix(rgb, ground_tint.rgb * 0.49, lane_edge * 0.20 + corner * 0.30);
+		rgb = mix(rgb, ground_tint.rgb * 0.49, (lane_edge * 0.20 + corner * 0.30) * lane_emphasis);
 	}
 	// The extra apron in wide or tall windows recedes into the seasonal palette.
 	float apron_distance = max(max(-p.x, p.x - stage_size.x), p.y - stage_size.y);

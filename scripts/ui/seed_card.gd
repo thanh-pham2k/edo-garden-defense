@@ -57,6 +57,13 @@ func setup(p_id: String, p_idx: int) -> void:
 	_bg_rect.texture = _tex_ready
 	add_child(_bg_rect)
 
+	var category_mark := ColorRect.new()
+	category_mark.color = GameData.defender_category(p_id)["color"]
+	category_mark.position = Vector2(28, 12)
+	category_mark.size = Vector2(28, 4)
+	category_mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(category_mark)
+
 	_icon_rect = TextureRect.new()
 	_icon_rect.position = Vector2(14.0, 20.0)
 	_icon_rect.size = Vector2(56.0, 56.0)
@@ -65,6 +72,17 @@ func setup(p_id: String, p_idx: int) -> void:
 	_icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_icon_rect.texture = load(data["icon"]) as Texture2D
 	add_child(_icon_rect)
+	if data.has("card_hint"):
+		_icon_rect.size = Vector2(56.0, 48.0)
+		var card_hint := Label.new()
+		card_hint.text = data["card_hint"]
+		card_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card_hint.position = Vector2(12.0, 69.0)
+		card_hint.size = Vector2(60.0, 13.0)
+		card_hint.add_theme_font_size_override("font_size", 11)
+		card_hint.add_theme_color_override("font_color", Color(0.36, 0.14, 0.08))
+		card_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(card_hint)
 
 	_cooldown_mask = ColorRect.new()
 	_cooldown_mask.color = Color(0.05, 0.04, 0.08, 0.62)

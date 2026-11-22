@@ -41,6 +41,7 @@ var speed_buff_timer: float = 0.0
 var has_vaulted: bool = false
 var has_switched_lane: bool = false
 var _transformed: bool = false
+var lantern_revealed := false
 
 var _battle: Node = null
 var _data: Dictionary = {}
@@ -118,6 +119,18 @@ func setup(battle_ref: Node, p_id: String, p_lane: int, spawn_pos: Vector2) -> v
 	_status_display.add_child(_stun_sprite)
 
 	_skill_timer = randf_range(2.5, 4.5)
+
+
+func set_fog_visibility(target: float, delta: float) -> void:
+	modulate.a = move_toward(modulate.a, target, delta * 7.0)
+	visible = modulate.a > 0.02
+
+
+func set_lantern_revealed(in_light: bool) -> void:
+	var revealed := in_light and _transformed
+	if revealed != lantern_revealed:
+		lantern_revealed = revealed
+		_status_display.queue_redraw()
 
 
 func is_dying() -> bool:
@@ -271,6 +284,8 @@ func _draw_status() -> void:
 
 	# Compact overhead combat status badges
 	var badges: Array[Texture2D] = []
+	if lantern_revealed:
+		_status_display.draw_arc(Vector2(0.0, -16.0), 23.0, PI * 0.13, PI * 0.87, 14, Color(0.37, 0.91, 0.84, 0.88), 2.0, true)
 	if is_boss:
 		badges.append(BADGE_BOSS)
 	if armor_hp > 0.0:
@@ -432,8 +447,12 @@ func _process_walk(delta: float, speed_mult: float, anim_fps: float) -> void:
 	_state = "walk"
 	_set_anim(_move_tex)
 	var move_spd := base_speed * speed_mult
-	if enemy_id == "kappa" and _battle and _battle.is_water_lane(lane):
-		move_spd *= 1.35
+	if enemy_id == "kappa" and _battle:
+		var col := floori((position.x - GameData.GRID_ORIGIN.x) / GameData.CELL_SIZE.x)
+		if _battle.is_water_cell(lane, col):
+			move_spd *= 1.35
+	if lantern_revealed:
+		move_spd *= 0.88
 	position.x -= move_spd * delta
 
 	if _sprite and is_flying:

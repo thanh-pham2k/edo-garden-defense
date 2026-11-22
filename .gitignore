@@ -15,3 +15,7 @@ mono_crash.*.json
 # macOS
 .DS_Store
 ._*
+
+# Web build output and Vercel project metadata
+/build/
+/.vercel/

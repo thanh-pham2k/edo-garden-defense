@@ -44,12 +44,20 @@ func _run_all_tests() -> void:
 	_assert(insets.is_equal_approx(Vector4(80, 32, 70, 28)), "Safe area preserves asymmetric cutouts under 2x viewport scaling")
 	_assert(SAFE_AREA.scaled_insets(Rect2i(0, 0, 1280, 720), Rect2i(), Vector2(1280, 720)) == Vector4.ZERO, "Unavailable safe area preserves viewport margins")
 
-	# 1. Verify all 10 Defenders, 10 Enemies, and 5 Levels textures load cleanly
+	# Check the 15-card roster, enemies, and 24 stages before exercising combat.
+	var categorized := {}
+	for category in game_data.DEFENDER_CATEGORIES:
+		for did in category["members"]:
+			_assert(not categorized.has(did), "Defender is assigned once: " + did)
+			categorized[did] = true
+	_assert(categorized.size() == 15 and categorized.size() == game_data.DEFENDERS.size(),
+		"All 15 defenders belong to the four role groups")
 	for did in game_data.DEFENDER_ORDER:
 		var d: Dictionary = game_data.DEFENDERS[did]
 		_assert(ResourceLoader.exists(d["idle_sheet"]), "Missing idle_sheet for " + did)
 		_assert(ResourceLoader.exists(d["action_sheet"]), "Missing action_sheet for " + did)
 		_assert(ResourceLoader.exists(d["icon"]), "Missing icon for " + did)
+		_assert(categorized.has(did), "%s is present in the picker" % did)
 
 	for eid in game_data.ENEMIES.keys():
 		var e: Dictionary = game_data.ENEMIES[eid]
@@ -102,9 +110,9 @@ func _run_all_tests() -> void:
 				var source_rect := Rect2(Vector2.ZERO, texture.get_size())
 				_assert(source_rect.has_point(Vector2(contact.x, contact.y)) and contact.z > 0.0 and contact.z <= texture.get_width(),
 					"Invalid scenery contact or visible width for %s" % scenery_path)
-		# The battlefield uses panel 0 and the chapter menu uses panel 2.
-		for p_idx in [0, 2]:
-			_assert(ResourceLoader.exists("res://assets/sprites/backgrounds/%s_%d.png" % [lvl["bg_stem"], p_idx]), "Missing background panel %d for level %d" % [p_idx, lvl["id"]])
+		# The menu renders the same battlefield backdrop as the battle scene.
+		_assert(ResourceLoader.exists("res://assets/sprites/backgrounds/%s_0.png" % lvl["bg_stem"]),
+			"Missing battlefield background for level %d" % lvl["id"])
 
 	for extra_path in [
 		"res://assets/sprites/environments/env_path_stepping_stones.png",
@@ -157,6 +165,7 @@ func _run_all_tests() -> void:
 		"res://assets/sprites/tiles/tile_volcanic_stone_0.png",
 		"res://assets/sprites/tiles/tile_ember_gravel_1.png",
 		"res://assets/sprites/backgrounds/bg_ch6_blood_moon_shrine_0.png",
+		"res://assets/sprites/backgrounds/bg_volcano_sky.png",
 	]:
 		_assert(ResourceLoader.exists(extra_path), "Missing adapted sprite " + extra_path)
 
@@ -166,6 +175,28 @@ func _run_all_tests() -> void:
 	root.add_child(menu)
 	await process_frame
 	_assert(menu.is_inside_tree(), "MainMenu enters tree cleanly")
+	_assert(menu._deck_buttons.size() == 15 and menu._stage_view.get_child_count() == 1,
+		"Pre-battle menu presents every defender and a live battlefield preview")
+	menu._filter_categories(2)
+	_assert(not menu._category_sections[0].visible and menu._category_sections[1].visible,
+		"Role filtering keeps only the chosen group visible")
+	menu._filter_categories(0)
+	var original_deck: Array[String] = game_data.selected_deck.duplicate()
+	game_data.selected_deck.assign(game_data.DEFENDER_ORDER.slice(0, 8))
+	var full_deck: Array[String] = game_data.selected_deck.duplicate()
+	_assert(not game_data.toggle_deck_member("den_soi_yeu"), "The ninth card is rejected")
+	game_data.remember_battle_deck()
+	game_data.selected_deck.assign(["den_soi_yeu"])
+	menu._reuse_deck()
+	_assert(game_data.selected_deck == full_deck, "Reuse Previous Deck restores the committed eight cards")
+	game_data.selected_deck.clear()
+	game_data.previous_deck.clear()
+	game_data.load_progress()
+	_assert(game_data.selected_deck == full_deck and game_data.previous_deck == full_deck,
+		"The draft and last played deck both survive a save reload")
+	_assert(game_data.valid_deck(["invalid", "den_soi_yeu", "den_soi_yeu", "than_den"]) == ["den_soi_yeu", "than_den"],
+		"Save validation removes unknown and duplicate card IDs")
+	game_data.selected_deck.assign(original_deck)
 	game_data.unlock_all_levels()
 	_assert(game_data.unlocked_level == 24 and game_data.LEVELS.size() == 24, "All 24 levels unlock cleanly")
 	_assert(game_data.get_level_config(21)["waves"].size() == 10, "Marathon stage 7-3 has 10 waves")
@@ -180,6 +211,15 @@ func _run_all_tests() -> void:
 	root.add_child(battle)
 	await process_frame
 	_assert(battle.is_water_lane(2), "Chapter 3 lane 2 is Koi water lane")
+	_assert(is_equal_approx(Engine.time_scale, 0.9) and battle._speed_badge.text == "0.9x",
+		"New battles start preparation at the slower default")
+	battle._wave_timer = float(battle.level_cfg["waves"][0]["delay"])
+	battle._process_waves(0.0)
+	_assert(battle._wave_index == 1 and is_equal_approx(Engine.time_scale, 0.9),
+		"The first wave retains the slower normal speed")
+	battle._wave_index = 0
+	battle._wave_timer = 0.0
+	battle._spawn_queue.clear()
 	_assert(battle.get_all_obstacles().size() == 4, "Chapter 3 spawns its 4 configured obstacles")
 	_check_pond_koi(battle)
 
@@ -208,7 +248,7 @@ func _run_all_tests() -> void:
 	battle._spawn_queue.clear()
 	battle._wave_index = 0
 	battle._wave_timer = 0.0
-	battle.set_game_speed(1.0)
+	battle.set_game_speed(game_data.NORMAL_BATTLE_SPEED)
 
 	# Test Obstacle placement lock, thorns reflection, Sake barrel explosion & Shovel clearing
 	var obs_block_fail = battle.try_plant_defender("dao_tien", 1, 6, -1, true)
@@ -251,6 +291,23 @@ func _run_all_tests() -> void:
 	var d_trap = battle.try_plant_defender("phu_chu", 4, 4, -1, true)
 
 	_assert(d_than != null and d_dao != null and d_tre != null and d_ice != null, "P0 shooters/producer planted")
+	var shot_target = battle.spawn_enemy("tieu_yeu", d_dao.row, d_dao.position.x + 164.0)
+	var projectile_count: int = battle._projectile_layer.get_child_count()
+	d_dao._start_action()
+	d_dao._process_standard_defender(3.1 / 15.0)
+	_assert(d_dao._sprite.frame == 3 and battle._projectile_layer.get_child_count() == projectile_count,
+		"Đào Tiên charges without firing through the first three atlas frames")
+	d_dao._process_standard_defender(1.0 / 15.0)
+	var petal_shot = battle._projectile_layer.get_child(-1)
+	_assert(d_dao._sprite.frame == 4 and battle._projectile_layer.get_child_count() == projectile_count + 1
+		and petal_shot.kind == "petal" and petal_shot.lane == d_dao.row,
+		"Đào Tiên fires one petal into its lane on atlas frame four")
+	var target_hp: float = shot_target.hp
+	petal_shot._process(0.37)
+	_assert(is_equal_approx(shot_target.hp, target_hp - 24.0), "A Đào Tiên projectile hits for 24 damage")
+	battle.on_enemy_killed(shot_target)
+	shot_target.queue_free()
+	d_dao._end_action()
 	_assert(d_nam != null and d_bi != null and d_heal != null and d_wind != null and d_trap != null, "Remaining defenders planted")
 
 	# Advance Thần Đèn from placement through its first production animation.
@@ -414,14 +471,15 @@ func _run_all_tests() -> void:
 	_assert(battle.trigger_active_skill("skill_thunder_scroll"), "Thunder Scroll skill triggers")
 	_assert(skill_target.hp <= sk_hp_before - 255.0 and skill_target.stun_timer >= 1.2, "Thunder Scroll deals 260 dmg & stuns enemies")
 
-	# Test Speed toggle (1x -> 2x -> 5x -> 1x)
+	# Test speed changes and the slower starting pace.
 	battle._on_toggle_speed()
 	_assert(battle.speed_2x and is_equal_approx(Engine.time_scale, 2.0), "Speed toggles to 2x")
 	battle._on_toggle_speed()
 	var expected_speed := 2.0 if battle._wave_index == 0 else 5.0
 	_assert(not battle.speed_2x and is_equal_approx(Engine.time_scale, expected_speed) and is_equal_approx(battle.speed_multiplier, 5.0), "Speed selects 5x with a 2x cap during preparation")
 	battle._on_toggle_speed()
-	_assert(not battle.speed_2x and is_equal_approx(Engine.time_scale, 1.0), "Speed toggles back to 1x")
+	_assert(not battle.speed_2x and is_equal_approx(Engine.time_scale, 0.9) and battle._speed_badge.text == "0.9x",
+		"Speed toggles back to the 0.9x default and labels it correctly")
 
 	# Test 5x Auto-Play state & tactical decision step (collects Spirit Flames + plants defender)
 	game_data.start_auto_play(600.0, 5.0)
@@ -433,7 +491,7 @@ func _run_all_tests() -> void:
 	_assert(auto_fl.collected, "Auto-Play AI collects uncollected Spirit Flames")
 	_assert(battle.get_all_defenders().size() > def_count_before, "Auto-Play AI plants defender cleanly at 5x speed")
 	game_data.stop_auto_play()
-	battle.set_game_speed(1.0)
+	battle.set_game_speed(game_data.NORMAL_BATTLE_SPEED)
 
 	# A fast pointer movement collects both orbs along the path, including
 	# when the platform emits only one emulated mouse event for a touch swipe.
@@ -555,6 +613,9 @@ func _run_all_tests() -> void:
 	finale.queue_free()
 	await process_frame
 
+	await _check_extended_layouts(battle_scene, game_data)
+	await _check_fog_gameplay(battle_scene, game_data)
+
 	if _failures.is_empty():
 		print("=== ALL GAMEPLAY VERIFICATION CHECKS PASSED (0 failures) ===")
 		quit(0)
@@ -594,3 +655,104 @@ func _check_pond_koi(battle: Node) -> void:
 		"An oval-swimming koi turns a full 360 degrees")
 	battle._pond_koi_time = original_time
 	battle._update_pond_koi(0.0)
+
+
+func _check_extended_layouts(scene: PackedScene, data: Node) -> void:
+	var expected := ["twin_pond", "stone_island", "twin_pond", "fog_night", "stone_island", "fog_night"]
+	var total_waves := [8, 9, 10, 10, 11, 12]
+	for slot in expected.size():
+		data.selected_level = 19 + slot
+		var battle := scene.instantiate()
+		root.add_child(battle)
+		var config: Dictionary = battle.level_cfg
+		_assert(config["layout"] == expected[slot] and config["waves"].size() == total_waves[slot],
+			"Extended stage %d retains its wave count and uses its assigned layout" % data.selected_level)
+		match config["layout"]:
+			"twin_pond":
+				var rows: Array = data.stage_water_rows(config)
+				_assert(rows.size() == 2 and rows[0] != rows[1], "Twin Pond contains two distinct water lanes")
+				for row: int in rows:
+					var plant = battle.try_plant_defender("den_soi_yeu", row, 2, -1, true)
+					_assert(plant != null and battle._water_lily_overlays[row][2].visible, "Each pond lane supports a planted defender")
+			"stone_island":
+				var row: int = config["water_lanes"][0]
+				_assert(not battle.is_water_cell(row, 4) and battle.is_water_cell(row, 3),
+					"Island and deep-water tiles agree with terrain layout")
+				_assert(battle.try_plant_defender("than_den", row, 3, -1, true) == null,
+					"Deep water rejects planting through the normal and bypass paths")
+				var island_plant = battle.try_plant_defender("than_den", row, 4, -1, true)
+				_assert(island_plant != null and battle._water_lily_overlays[row][4] == null,
+					"Planting on the dry island uses the normal ground anchor")
+			"fog_night":
+				_assert(battle._fog != null, "Fog Night creates a tactical fog field")
+		battle.queue_free()
+		await process_frame
+
+
+func _check_fog_gameplay(scene: PackedScene, data: Node) -> void:
+	data.selected_level = 10
+	var battle := scene.instantiate()
+	root.add_child(battle)
+	var fog = battle._fog
+	var boss = battle.spawn_enemy("boss_shogun", 2, data.cell_to_world(2, 8).x)
+	var hidden = battle.spawn_enemy("tieu_yeu", 4, data.cell_to_world(4, 8).x)
+	_assert(fog != null and not boss.visible and not hidden.visible and battle._count_active_enemies() == 2,
+		"Fog hides spawned bodies and boss bars while enemies remain registered")
+	var original_x: float = hidden.position.x
+	hidden._process_walk(0.2, 1.0, 9.0)
+	_assert(hidden.position.x < original_x, "Concealed Yokai move normally")
+	var old_hp: float = hidden.hp
+	var dart = battle.spawn_projectile(hidden.position - Vector2(90, 0), 4, "dart", 22.0)
+	dart._process(0.2)
+	_assert(hidden.hp < old_hp, "A projectile hits a concealed enemy normally")
+	var cue = battle.spawn_vfx("res://assets/sprites/fx/fx_stun_stars.png", Vector2i(4, 3), hidden.position)
+	_assert(cue._sprite.modulate.a < 0.02, "Combat cues do not expose a concealed enemy's position")
+
+	var first = battle.try_plant_defender("den_soi_yeu", 2, 6, -1, true)
+	var second = battle.try_plant_defender("than_den", 2, 7, -1, true)
+	battle._update_visibility(0.52)
+	_assert(first != null and second != null and boss.visible and not hidden.visible,
+		"Overlapping lanterns reveal a boss locally while another lane stays concealed")
+	_assert(fog.opacity_at(data.cell_to_world(1, 8)) < 0.18 and fog.opacity_at(data.cell_to_world(4, 8)) > 0.48,
+		"The dedicated lantern covers three rows by five columns at tile centers")
+	battle.dig_defender(2, 6)
+	battle._update_visibility(0.52)
+	_assert(boss.visible, "Overlap remains visible when just one light is removed")
+	battle.dig_defender(2, 7)
+	battle._update_visibility(2.0)
+	_assert(not boss.visible, "Fog restores after the last light source is removed")
+
+	var fire = battle.spawn_projectile(hidden.position, 4, "phoenix", 0.0)
+	battle._update_visibility(0.35)
+	_assert(hidden.visible, "The moving phoenix projectile illuminates the fog around its path")
+	fire.queue_free()
+	battle._update_visibility(2.0)
+	_assert(not hidden.visible, "Projectile light decays after its source disappears")
+	var wind = battle.spawn_projectile(boss.position, 2, "wind", 0.0)
+	battle._update_visibility(0.5)
+	_assert(boss.visible and not hidden.visible, "Wind opens its lane and neighboring lanes locally")
+	wind.queue_free()
+	battle._update_visibility(9.5)
+	_assert(boss.visible, "Wind remains active for at least ten seconds")
+	battle._update_visibility(2.6)
+	_assert(not boss.visible, "Wind expires and its fog restores smoothly")
+	battle.queue_free()
+	await process_frame
+
+	data.selected_level = 1
+	var clear_battle := scene.instantiate()
+	root.add_child(clear_battle)
+	var at := 0
+	for id: String in data.DEFENDER_ORDER:
+		var placed = clear_battle.try_plant_defender(id, floori(at / 5.0), at % 5, -1, true)
+		_assert(placed != null and placed._sprite.texture != null, "The battle can place and render " + id)
+		at += 1
+	var tanuki = clear_battle.spawn_enemy("tanuki", 2, data.cell_to_world(2, 4).x)
+	tanuki._transformed = true
+	clear_battle._update_visibility(0.15)
+	_assert(tanuki.lantern_revealed, "The lantern marks transformed Tanuki on a stage without fog")
+	clear_battle.dig_defender(2, 4)
+	clear_battle._update_visibility(0.15)
+	_assert(not tanuki.lantern_revealed, "A transformed Tanuki loses the mark when the lantern is removed")
+	clear_battle.queue_free()
+	await process_frame

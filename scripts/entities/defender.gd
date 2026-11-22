@@ -18,6 +18,7 @@ var attack_interval: float = 1.35
 var frozen_timer: float = 0.0
 var haste_timer: float = 0.0
 var is_consuming: bool = false
+var light_cells := Vector2.ZERO
 
 var _battle: Node = null
 var _data: Dictionary = {}
@@ -48,6 +49,7 @@ func setup(battle_ref: Node, p_id: String, p_row: int, p_col: int, world_pos: Ve
 	z_index = 20 + row * 2
 
 	_data = GameData.DEFENDERS[p_id]
+	light_cells = _data.get("light_cells", Vector2.ZERO)
 	var hp_mult := 1.0 if (p_id == "phao_hoa" or p_id == "phu_chu") else GameData.get_defender_hp_mult()
 	max_hp = float(_data.get("hp", 320.0)) * hp_mult
 	hp = max_hp
@@ -137,6 +139,11 @@ func apply_haste(duration: float) -> void:
 
 
 func _draw() -> void:
+	if defender_id == "den_soi_yeu":
+		draw_set_transform(Vector2(0, GameData.LANE_CONTACT_OFFSET + 1), 0.0, Vector2(1.0, 0.39))
+		draw_circle(Vector2.ZERO, 32.0, Color(0.34, 0.92, 0.81, 0.14), true, -1.0, true)
+		draw_arc(Vector2.ZERO, 30.0, 0.0, TAU, 32, Color(0.52, 0.95, 0.83, 0.46), 2.0, true)
+		draw_set_transform(Vector2.ZERO)
 	# Soft ground shadow
 	draw_set_transform(Vector2(0.0, GameData.LANE_CONTACT_OFFSET), 0.0, Vector2(1.0, 0.34))
 	draw_circle(Vector2.ZERO, 26.0, Color(0.0, 0.0, 0.0, 0.24))
@@ -316,6 +323,8 @@ func _should_trigger_action() -> bool:
 	match defender_id:
 		"than_den":
 			return true
+		"den_soi_yeu":
+			return false
 		"chua_lanh":
 			return _has_ally_needing_heal()
 		"daruma_buff":
@@ -467,8 +476,10 @@ func _execute_action_effect() -> void:
 func _fire_projectile(kind: String, dmg: float) -> void:
 	if _battle == null:
 		return
+	var muzzle_offset := Vector2(28.0, -16.0)
 	match kind:
 		"petal":
+			muzzle_offset.y = -5.0
 			AudioManager.play_sfx("shoot_petal", -10.0)
 		"dart":
 			AudioManager.play_sfx("shoot_dart", -10.0)
@@ -476,4 +487,4 @@ func _fire_projectile(kind: String, dmg: float) -> void:
 			AudioManager.play_sfx("shoot_ice", -9.0)
 		"phoenix":
 			AudioManager.play_sfx("shoot_petal", -7.0)
-	_battle.spawn_projectile(position + Vector2(28.0, -16.0), row, kind, dmg)
+	_battle.spawn_projectile(position + muzzle_offset, row, kind, dmg)

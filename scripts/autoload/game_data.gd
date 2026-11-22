@@ -12,12 +12,14 @@ const GRID_ORIGIN := Vector2(228.0, 174.0)
 const LANE_CONTACT_OFFSET := 24.0
 const SAVE_PATH := "user://edo_save.json"
 const MAX_DECK_SIZE := 8
+const NORMAL_BATTLE_SPEED := 0.90
 
 var selected_level: int = 1
 var selected_deck: Array[String] = [
 	"than_den", "dao_tien", "tre_no", "bi_ngo",
 	"nam_doc", "ho_lo_bang", "phao_hoa", "gio_loc"
 ]
+var previous_deck: Array[String] = []
 var unlocked_level: int = 1
 var level_stars: Dictionary = {}
 var jade_gems: int = 15
@@ -27,7 +29,7 @@ var sound_muted: bool = false
 var audio_layers := {"music": true, "ambience": true, "sfx": true}
 
 # Runtime 5x speed & 10-minute auto-play state
-var game_speed_multiplier: float = 1.0
+var game_speed_multiplier: float = NORMAL_BATTLE_SPEED
 var auto_play_active: bool = false
 var auto_play_end_ticks_msec: int = 0
 
@@ -130,15 +132,23 @@ const ITEM_ICONS: Array[String] = [
 const DEFENDER_ORDER: Array[String] = [
 	"than_den", "dao_tien", "tre_no", "bi_ngo", "nam_doc",
 	"ho_lo_bang", "phao_hoa", "phu_chu", "gio_loc", "chua_lanh",
-	"hoa_phuong", "daruma_buff", "meo_kiem", "cung_sam"
+	"hoa_phuong", "daruma_buff", "meo_kiem", "cung_sam", "den_soi_yeu"
+]
+
+const DEFENDER_CATEGORIES := [
+	{"name": "Kinh tế & Hỗ trợ", "color": Color("#519880"), "members": ["than_den", "bi_ngo", "chua_lanh", "daruma_buff", "den_soi_yeu"]},
+	{"name": "Sát thương", "color": Color("#bd6351"), "members": ["dao_tien", "tre_no", "meo_kiem", "hoa_phuong", "cung_sam"]},
+	{"name": "Khống chế & Phá giáp", "color": Color("#587faf"), "members": ["ho_lo_bang", "nam_doc", "gio_loc"]},
+	{"name": "Bẫy & Bộc phát", "color": Color("#aa7335"), "members": ["phu_chu", "phao_hoa"]},
 ]
 
 const DEFENDERS: Dictionary = {
 	"dao_tien": {
 		"id": "dao_tien",
 		"name": "Đào Tiên",
-		"role": "Bắn đơn cánh hoa",
-		"desc": "Bắn cánh hoa anh đào thẳng 1 hàng (24 sát thương).",
+		"role": "Tấn công tầm xa",
+		"card_hint": "Bắn xa",
+		"desc": "Quân tấn công tầm xa. Tự bắn từng cánh hoa vào Yokai cùng hàng, gây 24 sát thương mỗi phát.",
 		"cost": 100,
 		"cooldown": 6.5,
 		"hp": 320.0,
@@ -170,13 +180,14 @@ const DEFENDERS: Dictionary = {
 		"id": "than_den",
 		"name": "Thần Đèn",
 		"role": "Tạo Linh Hỏa",
-		"desc": "Tạo 30 Linh Hỏa sau khoảng 2 giây khi đặt, rồi mỗi khoảng 9 giây.",
+		"desc": "Tạo 30 Linh Hỏa sau khoảng 2 giây khi đặt, rồi mỗi khoảng 9 giây. Chiếu sáng khoảng 2,2 ô.",
 		"cost": 50,
 		"cooldown": 6.5,
 		"hp": 260.0,
 		"attack_interval": 8.0,
 		"first_action_delay": 1.7,
 		"damage": 0.0,
+		"light_cells": Vector2(2.2, 2.2),
 		"idle_sheet": "res://assets/sprites/defenders/than_den_idle.png",
 		"idle_grid": Vector2i(3, 2),
 		"action_sheet": "res://assets/sprites/defenders/than_den_produce.png",
@@ -203,7 +214,7 @@ const DEFENDERS: Dictionary = {
 		"id": "nam_doc",
 		"name": "Nấm Độc",
 		"role": "Độc lan xuyên giáp",
-		"desc": "Phun khói độc tầm 3.8 ô, xuyên giáp Kappa & Samurai.",
+		"desc": "Phun khói độc tầm 3,8 ô, gây 30 sát thương xuyên giáp và 8 sát thương độc mỗi giây trong 3 giây.",
 		"cost": 150,
 		"cooldown": 9.0,
 		"hp": 320.0,
@@ -252,7 +263,7 @@ const DEFENDERS: Dictionary = {
 		"id": "phu_chu",
 		"name": "Phù Chú",
 		"role": "Bẫy choáng 4s",
-		"desc": "Kích nổ khi Yokai chạm vào, gây choáng vùng 1×3 trong 4s.",
+		"desc": "Bẫy kích hoạt khi Yokai đến gần, gây 65 sát thương xuyên giáp và choáng 4 giây trên một hàng.",
 		"cost": 75,
 		"cooldown": 15.0,
 		"hp": 9999.0,
@@ -267,8 +278,8 @@ const DEFENDERS: Dictionary = {
 	"gio_loc": {
 		"id": "gio_loc",
 		"name": "Gió Lốc",
-		"role": "Đẩy lùi / Hạ Tengu",
-		"desc": "Thổi luồng gió tầm 5.5 ô đẩy lùi Yokai mượt 1.2 ô; hạ gục Tengu bay.",
+		"role": "Đẩy lùi / Hạ cánh Tengu",
+		"desc": "Đẩy lùi Yokai 1,2 ô trong tầm 5,5 ô. Ép Yokai bay hạ cánh và gây 180 sát thương xuyên giáp. Luồng gió dọn sương trên làn của nó và hai làn bên cạnh trong 11 giây.",
 		"cost": 125,
 		"cooldown": 12.0,
 		"hp": 320.0,
@@ -302,12 +313,13 @@ const DEFENDERS: Dictionary = {
 		"id": "hoa_phuong",
 		"name": "Hỏa Phượng",
 		"role": "Cầu lửa nổ & Tan băng",
-		"desc": "Phóng cầu lửa Phượng Hoàng nổ lan vùng 3×3 (38 dmg) & giải băng cho đồng đội.",
+		"desc": "Phóng cầu lửa Phượng Hoàng nổ lan vùng 3×3 (38 dmg) & giải băng cho đồng đội. Chiếu sáng 2,5 ô; cầu lửa mở đường sáng khi bay.",
 		"cost": 225,
 		"cooldown": 9.0,
 		"hp": 320.0,
 		"attack_interval": 1.75,
 		"damage": 38.0,
+		"light_cells": Vector2(2.5, 2.5),
 		"idle_sheet": "res://assets/sprites/defenders/hoa_phuong_idle.png",
 		"idle_grid": Vector2i(3, 2),
 		"action_sheet": "res://assets/sprites/defenders/hoa_phuong_attack.png",
@@ -362,6 +374,23 @@ const DEFENDERS: Dictionary = {
 		"action_sheet": "res://assets/sprites/defenders/cung_sam_attack.png",
 		"action_grid": Vector2i(4, 3),
 		"icon": "res://assets/sprites/defenders/cung_sam_icon.png",
+	},
+	"den_soi_yeu": {
+		"id": "den_soi_yeu",
+		"name": "Đèn Soi Yêu",
+		"role": "Chiếu sáng 3 hàng × 5 cột",
+		"desc": "Xua sương trong 3 hàng × 5 cột quanh đèn. Làm lộ và làm chậm nhẹ Tanuki đã biến hình trong vùng sáng.",
+		"cost": 50,
+		"cooldown": 8.0,
+		"hp": 180.0,
+		"attack_interval": 4.0,
+		"damage": 0.0,
+		"light_cells": Vector2(2.5, 1.5),
+		"idle_sheet": "res://assets/sprites/defenders/den_soi_yeu_idle.png",
+		"idle_grid": Vector2i(3, 2),
+		"action_sheet": "res://assets/sprites/defenders/den_soi_yeu_idle.png",
+		"action_grid": Vector2i(3, 2),
+		"icon": "res://assets/sprites/defenders/den_soi_yeu_icon.png",
 	},
 }
 
@@ -785,6 +814,7 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/environments/flora_moss_lantern_cluster.png",
 		],
 		"atmosphere_style": "day",
+		"lane_emphasis": 1.35,
 		"tile_primary": "tile_grass",
 		"tile_alt": "tile_dirt",
 		"water_lane": -1,
@@ -820,6 +850,7 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/environments/flora_moss_lantern_cluster.png",
 		],
 		"atmosphere_style": "day",
+		"lane_emphasis": 1.35,
 		"tile_primary": "tile_grass",
 		"tile_alt": "tile_dirt",
 		"water_lane": -1,
@@ -859,6 +890,7 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/environments/flora_moss_lantern_cluster.png",
 		],
 		"atmosphere_style": "day",
+		"lane_emphasis": 1.35,
 		"tile_primary": "tile_grass",
 		"tile_alt": "tile_dirt",
 		"water_lane": -1,
@@ -1164,6 +1196,7 @@ const LEVELS: Array[Dictionary] = [
 		"tile_primary": "tile_gravel_night",
 		"tile_alt": "tile_cobble",
 		"water_lane": -1,
+		"fog": {"columns": 3.25, "opacity": 0.68, "transition": 0.40, "recovery": 1.5},
 		"sky_top": Color(0.16, 0.14, 0.25, 1),
 		"sky_bottom": Color(0.32, 0.31, 0.42, 1),
 		"ground_tint": Color(0.24, 0.24, 0.30, 1),
@@ -1209,6 +1242,7 @@ const LEVELS: Array[Dictionary] = [
 		"tile_primary": "tile_gravel_night",
 		"tile_alt": "tile_cobble",
 		"water_lane": -1,
+		"fog": {"columns": 3.50, "opacity": 0.74, "transition": 0.40, "recovery": 1.5},
 		"sky_top": Color(0.16, 0.14, 0.25, 1),
 		"sky_bottom": Color(0.32, 0.31, 0.42, 1),
 		"ground_tint": Color(0.24, 0.24, 0.30, 1),
@@ -1253,6 +1287,7 @@ const LEVELS: Array[Dictionary] = [
 		"tile_primary": "tile_gravel_night",
 		"tile_alt": "tile_cobble",
 		"water_lane": -1,
+		"fog": {"columns": 3.75, "opacity": 0.80, "transition": 0.40, "recovery": 1.5},
 		"sky_top": Color(0.16, 0.14, 0.25, 1),
 		"sky_bottom": Color(0.32, 0.31, 0.42, 1),
 		"ground_tint": Color(0.24, 0.24, 0.30, 1),
@@ -1564,7 +1599,8 @@ const LEVELS: Array[Dictionary] = [
 		"atmosphere_style": "day",
 		"tile_primary": "tile_grass",
 		"tile_alt": "tile_dirt",
-		"water_lane": -1,
+		"layout": "twin_pond",
+		"water_lanes": [1, 3],
 		"sky_top": Color(0.55, 0.78, 0.94, 1),
 		"sky_bottom": Color(0.84, 0.93, 0.88, 1),
 		"ground_tint": Color(0.45, 0.63, 0.34, 1),
@@ -1609,7 +1645,10 @@ const LEVELS: Array[Dictionary] = [
 		"atmosphere_style": "sunset",
 		"tile_primary": "tile_moss_stone",
 		"tile_alt": "tile_cobble",
-		"water_lane": -1,
+		"layout": "stone_island",
+		"water_lanes": [2],
+		"island_columns": Vector2i(4, 6),
+		"deep_water_columns": [3, 7],
 		"sky_top": Color(0.72, 0.36, 0.28, 1),
 		"sky_bottom": Color(0.95, 0.69, 0.36, 1),
 		"ground_tint": Color(0.36, 0.44, 0.32, 1),
@@ -1656,7 +1695,8 @@ const LEVELS: Array[Dictionary] = [
 		"atmosphere_style": "night",
 		"tile_primary": "tile_moss_stone",
 		"tile_alt": "tile_sakura",
-		"water_lane": 2,
+		"layout": "twin_pond",
+		"water_lanes": [0, 2],
 		"sky_top": Color(0.11, 0.14, 0.30, 1),
 		"sky_bottom": Color(0.22, 0.31, 0.48, 1),
 		"ground_tint": Color(0.24, 0.28, 0.38, 1),
@@ -1702,10 +1742,12 @@ const LEVELS: Array[Dictionary] = [
 			"res://assets/sprites/environments/flora_moss_lantern_cluster.png",
 			"res://assets/sprites/props/prop_banner.png",
 		],
-		"atmosphere_style": "mist",
+		"atmosphere_style": "night",
 		"tile_primary": "tile_gravel_night",
 		"tile_alt": "tile_cobble",
-		"water_lane": -1,
+		"layout": "fog_night",
+		"water_lanes": [],
+		"fog": {"columns": 3.50, "opacity": 0.82, "transition": 0.40, "recovery": 1.5},
 		"sky_top": Color(0.16, 0.14, 0.25, 1),
 		"sky_bottom": Color(0.32, 0.31, 0.42, 1),
 		"ground_tint": Color(0.24, 0.24, 0.30, 1),
@@ -1754,7 +1796,10 @@ const LEVELS: Array[Dictionary] = [
 		"atmosphere_style": "snow",
 		"tile_primary": "tile_snow",
 		"tile_alt": "tile_gravel_night",
-		"water_lane": -1,
+		"layout": "stone_island",
+		"water_lanes": [3],
+		"island_columns": Vector2i(4, 6),
+		"deep_water_columns": [3, 7],
 		"sky_top": Color(0.16, 0.25, 0.40, 1),
 		"sky_bottom": Color(0.65, 0.80, 0.92, 1),
 		"ground_tint": Color(0.55, 0.65, 0.78, 1),
@@ -1803,7 +1848,9 @@ const LEVELS: Array[Dictionary] = [
 		"atmosphere_style": "volcano",
 		"tile_primary": "tile_volcanic_stone",
 		"tile_alt": "tile_ember_gravel",
-		"water_lane": -1,
+		"layout": "fog_night",
+		"water_lanes": [],
+		"fog": {"columns": 3.75, "opacity": 0.72, "transition": 0.40, "recovery": 1.5},
 		"sky_top": Color(0.24, 0.08, 0.14, 1),
 		"sky_bottom": Color(0.56, 0.22, 0.22, 1),
 		"ground_tint": Color(0.32, 0.22, 0.24, 1),
@@ -1856,7 +1903,7 @@ func start_auto_play(duration_sec: float = 600.0, speed: float = 5.0) -> void:
 func stop_auto_play() -> void:
 	auto_play_active = false
 	auto_play_end_ticks_msec = 0
-	game_speed_multiplier = 1.0
+	game_speed_multiplier = NORMAL_BATTLE_SPEED
 	Engine.time_scale = 1.0
 
 
@@ -1883,6 +1930,8 @@ func prepare_auto_play_loadout(lvl_id: int) -> void:
 		selected_deck.assign(["than_den", "tre_no", "bi_ngo", "hoa_phuong", "daruma_buff", "chua_lanh", "gio_loc", "phao_hoa"])
 	else:
 		selected_deck.assign(["than_den", "hoa_phuong", "cung_sam", "meo_kiem", "daruma_buff", "bi_ngo", "ho_lo_bang", "chua_lanh"])
+	if get_level_config(lvl_id).has("fog"):
+		selected_deck[selected_deck.size() - 1] = "den_soi_yeu"
 	save_progress()
 
 
@@ -1906,11 +1955,53 @@ func world_to_cell(pos: Vector2) -> Vector2i:
 	return Vector2i(row, col)
 
 
+func defender_category(defender_id: String) -> Dictionary:
+	for category in DEFENDER_CATEGORIES:
+		if defender_id in category["members"]:
+			return category
+	return {}
+
+
+func stage_water_rows(config: Dictionary) -> Array:
+	if config.has("water_lanes"):
+		return config["water_lanes"]
+	var lane := int(config.get("water_lane", -1))
+	return [] if lane < 0 else [lane]
+
+
+func valid_deck(entries: Variant) -> Array[String]:
+	var deck: Array[String] = []
+	if entries is Array:
+		for item in entries:
+			if item is String and DEFENDERS.has(item) and not deck.has(item):
+				deck.append(item)
+				if deck.size() == MAX_DECK_SIZE:
+					break
+	return deck
+
+
+func remember_battle_deck() -> void:
+	if not auto_play_active:
+		previous_deck = valid_deck(selected_deck)
+		save_progress()
+
+
+func reuse_previous_deck() -> bool:
+	var deck := valid_deck(previous_deck)
+	if deck.is_empty():
+		return false
+	selected_deck.assign(deck)
+	save_progress()
+	return true
+
+
 func is_deck_member(defender_id: String) -> bool:
 	return selected_deck.has(defender_id)
 
 
 func toggle_deck_member(defender_id: String) -> bool:
+	if not DEFENDERS.has(defender_id):
+		return false
 	if selected_deck.has(defender_id):
 		if selected_deck.size() <= 1:
 			return false
@@ -1990,6 +2081,7 @@ func save_progress() -> void:
 		"unlocked_level": unlocked_level,
 		"level_stars": level_stars,
 		"selected_deck": selected_deck,
+		"previous_deck": previous_deck,
 		"jade_gems": jade_gems,
 		"unlocked_upgrades": unlocked_upgrades,
 		"auto_collect_flame": auto_collect_flame,
@@ -2022,15 +2114,10 @@ func load_progress() -> void:
 	var stars_raw = parsed.get("level_stars", {})
 	if typeof(stars_raw) == TYPE_DICTIONARY:
 		level_stars = stars_raw
-	var deck_raw = parsed.get("selected_deck", [])
-	if typeof(deck_raw) == TYPE_ARRAY and deck_raw.size() > 0:
-		var clean_deck: Array[String] = []
-		for d in deck_raw:
-			var sid := str(d)
-			if DEFENDERS.has(sid) and not clean_deck.has(sid) and clean_deck.size() < MAX_DECK_SIZE:
-				clean_deck.append(sid)
-		if clean_deck.size() > 0:
-			selected_deck = clean_deck
+	var clean_deck := valid_deck(parsed.get("selected_deck", []))
+	if not clean_deck.is_empty():
+		selected_deck.assign(clean_deck)
+	previous_deck = valid_deck(parsed.get("previous_deck", clean_deck))
 	auto_collect_flame = bool(parsed.get("auto_collect_flame", true))
 	sound_muted = bool(parsed.get("sound_muted", false))
 	var saved_layers = parsed.get("audio_layers", {})
