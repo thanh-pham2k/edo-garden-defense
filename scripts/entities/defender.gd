@@ -16,6 +16,7 @@ var damage: float = 24.0
 var attack_interval: float = 1.35
 
 var frozen_timer: float = 0.0
+var haste_timer: float = 0.0
 var is_consuming: bool = false
 
 var _battle: Node = null
@@ -129,6 +130,12 @@ func apply_freeze(duration: float) -> void:
 		_frost_sprite.visible = true
 
 
+func apply_haste(duration: float) -> void:
+	if is_consuming or defender_id == "phao_hoa" or defender_id == "phu_chu":
+		return
+	haste_timer = maxf(haste_timer, duration)
+
+
 func _draw() -> void:
 	# Soft ground shadow
 	draw_set_transform(Vector2(0.0, GameData.LANE_CONTACT_OFFSET), 0.0, Vector2(1.0, 0.34))
@@ -149,9 +156,14 @@ func _process(delta: float) -> void:
 			_sprite.modulate = Color(0.65, 0.88, 1.0, 1.0)
 		return
 
+	if haste_timer > 0.0:
+		haste_timer = maxf(0.0, haste_timer - delta)
+
 	if _sprite:
 		if _hit_flash > 0.0:
 			_sprite.modulate = Color(1.5, 1.3, 1.3, 1.0)
+		elif haste_timer > 0.0:
+			_sprite.modulate = Color(1.18, 1.05, 0.78, 1.0)
 		else:
 			_sprite.modulate = Color.WHITE
 
@@ -277,7 +289,7 @@ func _process_standard_defender(delta: float) -> void:
 			_frame_idx = (_frame_idx + 1) % idle_total
 			_sprite.frame = _frame_idx
 
-		_action_timer += delta
+		_action_timer += delta * (1.40 if haste_timer > 0.0 else 1.0)
 		if _action_timer >= attack_interval and _should_trigger_action():
 			_start_action()
 	elif _state == "action":
@@ -306,6 +318,20 @@ func _should_trigger_action() -> bool:
 			return true
 		"chua_lanh":
 			return _has_ally_needing_heal()
+		"daruma_buff":
+			for ally in _battle.get_all_defenders():
+				if is_instance_valid(ally) and ally != self and not ally.is_consuming:
+					if absi(ally.row - row) <= 1 and absi(ally.col - col) <= 1:
+						return true
+			return false
+		"meo_kiem":
+			var meo_rng := float(_data.get("range_cells", 2.2)) * GameData.CELL_SIZE.x
+			for enemy in _battle.get_enemies_in_lane(row):
+				if is_instance_valid(enemy) and not enemy.is_dying():
+					var dx: float = enemy.position.x - position.x
+					if dx >= -16.0 and dx <= meo_rng:
+						return true
+			return false
 		"nam_doc":
 			var rng_px := float(_data.get("range_cells", 3.8)) * GameData.CELL_SIZE.x
 			for enemy in _battle.get_enemies_in_lane(row):
@@ -370,6 +396,39 @@ func _execute_action_effect() -> void:
 			_fire_projectile("dart", damage)
 		"ho_lo_bang":
 			_fire_projectile("ice", damage)
+		"hoa_phuong":
+			_fire_projectile("phoenix", damage)
+		"daruma_buff":
+			AudioManager.play_sfx("heal_chime", -4.0)
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_daruma_buff_ring.png", Vector2i(1, 1), position + Vector2(0, 12), 12.0, 0.78, 0.65)
+			for ally in _battle.get_all_defenders():
+				if is_instance_valid(ally) and not ally.is_consuming:
+					if absi(ally.row - row) <= 1 and absi(ally.col - col) <= 1:
+						ally.apply_haste(6.0)
+		"meo_kiem":
+			AudioManager.play_sfx("hit", -5.0)
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_katana_slash_wave.png", Vector2i(1, 1), position + Vector2(88.0, -8.0), 12.0, 0.86, 0.28, Vector2(220.0, 0.0))
+			var meo_rng := float(_data.get("range_cells", 2.2)) * GameData.CELL_SIZE.x
+			for enemy in _battle.get_enemies_in_lane(row):
+				if is_instance_valid(enemy) and not enemy.is_dying():
+					var dx: float = enemy.position.x - position.x
+					if dx >= -16.0 and dx <= meo_rng:
+						enemy.take_damage(damage, true)
+		"cung_sam":
+			AudioManager.play_sfx("stun_chime", -5.0)
+			var targets: Array = []
+			for enemy in _battle.get_enemies_in_lane(row):
+				if is_instance_valid(enemy) and not enemy.is_dying() and enemy.position.x >= position.x - 20.0:
+					targets.append(enemy)
+			targets.sort_custom(func(a, b) -> bool: return a.position.x < b.position.x)
+			var prev_pos: Vector2 = position + Vector2(28.0, -16.0)
+			for idx in range(mini(3, targets.size())):
+				var t = targets[idx]
+				t.take_damage(damage, true)
+				t.apply_stun(0.4)
+				var mid: Vector2 = (prev_pos + t.position) * 0.5 + Vector2(0, -10)
+				_battle.spawn_vfx("res://assets/sprites/fx/fx_chain_lightning_arc.png", Vector2i(1, 1), mid, 12.0, 0.78, 0.25)
+				prev_pos = t.position
 		"than_den":
 			var target := position + Vector2(randf_range(-24.0, 26.0), randf_range(8.0, 24.0))
 			var amount := GameData.get_flame_value() + GameData.LANTERN_FLAME_BONUS
@@ -415,4 +474,6 @@ func _fire_projectile(kind: String, dmg: float) -> void:
 			AudioManager.play_sfx("shoot_dart", -10.0)
 		"ice":
 			AudioManager.play_sfx("shoot_ice", -9.0)
+		"phoenix":
+			AudioManager.play_sfx("shoot_petal", -7.0)
 	_battle.spawn_projectile(position + Vector2(28.0, -16.0), row, kind, dmg)

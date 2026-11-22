@@ -7,11 +7,13 @@ const GROUND_CONTACTS := {
 	"house_ch3_koi_shrine": Vector3(128, 239, 230),
 	"house_ch4_castle_guard": Vector3(134, 239, 230),
 	"house_ch5_snow_shrine": Vector3(130, 238, 224),
-	"gate_ch1_sakura_torii": Vector3(127, 238, 207),
-	"gate_ch2_bamboo": Vector3(132, 238, 211),
-	"gate_ch3_night_torii": Vector3(127, 238, 204),
-	"gate_ch4_castle_gate": Vector3(129, 238, 215),
-	"gate_ch5_snow_torii": Vector3(131, 238, 224),
+	"house_ch6_fire_shrine": Vector3(133, 245, 230),
+	"gate_ch1_sakura_torii": Vector3(127, 245, 212),
+	"gate_ch2_bamboo": Vector3(127, 245, 212),
+	"gate_ch3_night_torii": Vector3(127, 245, 215),
+	"gate_ch4_castle_gate": Vector3(127, 245, 210),
+	"gate_ch5_snow_torii": Vector3(127, 245, 209),
+	"gate_ch6_volcano_torii": Vector3(127, 245, 217),
 	"flora_sakura_hedge": Vector3(128, 237, 230),
 	"prop_sakura_tree": Vector3(128, 235, 230),
 	"flora_moss_lantern_cluster": Vector3(128, 237, 230),
@@ -23,9 +25,11 @@ const GROUND_CONTACTS := {
 	"flora_autumn_maple": Vector3(130, 235, 230),
 	"flora_snow_pine_tall": Vector3(127, 236, 221),
 	"flora_snow_lantern_rock": Vector3(128, 236, 224),
+	"flora_ch6_ember_maple": Vector3(118, 245, 230),
 	"prop_red_bridge": Vector3(128, 237, 230),
 	"env_path_stepping_stones": Vector3(190, 97, 381),
 	"env_path_stones_sunset": Vector3(158, 77, 317),
+	"env_path_stones_night": Vector3(164, 87, 329),
 	"env_path_stones_winter": Vector3(154, 77, 308),
 }
 
@@ -34,7 +38,9 @@ var _contact_shadow: GradientTexture2D
 
 func place(parent: Node2D, path: String, foot: Vector2, width: float, depth: int, tint: Color = Color.WHITE, angle: float = 0.0) -> Sprite2D:
 	var texture := load(path) as Texture2D
-	var contact: Vector3 = GROUND_CONTACTS[path.get_file().get_basename()]
+	var art_name := path.get_file().get_basename()
+	var contact: Vector3 = GROUND_CONTACTS[art_name]
+	var art_scale := width / contact.z
 	_add_shadow(parent, foot + Vector2(0, 3), width, depth - 1)
 
 	var prop := Sprite2D.new()
@@ -42,7 +48,7 @@ func place(parent: Node2D, path: String, foot: Vector2, width: float, depth: int
 	prop.centered = false
 	prop.offset = -Vector2(contact.x, contact.y)
 	prop.position = foot
-	prop.scale = Vector2.ONE * (width / contact.z)
+	prop.scale = Vector2.ONE * art_scale
 	prop.modulate = tint
 	prop.rotation = angle
 	prop.z_index = depth

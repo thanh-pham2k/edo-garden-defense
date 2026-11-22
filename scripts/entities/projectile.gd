@@ -13,6 +13,7 @@ var armor_piercing: bool = false
 var knockback_px: float = 0.0
 var max_range: float = 0.0
 var is_piercing: bool = false
+var is_enemy_proj: bool = false
 
 var _battle: Node = null
 var _sprite: Sprite2D
@@ -67,6 +68,18 @@ func setup(battle_ref: Node, start_pos: Vector2, p_lane: int, p_kind: String, p_
 			is_piercing = true
 			knockback_px = float(GameData.DEFENDERS["gio_loc"].get("knockback_px", 115.0))
 			max_range = float(GameData.DEFENDERS["gio_loc"].get("range_cells", 5.5)) * GameData.CELL_SIZE.x
+		"phoenix":
+			tex_path = "res://assets/sprites/fx/proj_phoenix_fireball.png"
+			speed = 360.0
+			_spin_speed = 0.0
+		"kappa_water":
+			tex_path = "res://assets/sprites/fx/proj_kappa_water_orb.png"
+			speed = -250.0
+			is_enemy_proj = true
+		"kyubi_fire":
+			tex_path = "res://assets/sprites/fx/proj_kyubi_foxfire.png"
+			speed = -290.0
+			is_enemy_proj = true
 		"spirit":
 			tex_path = "res://assets/sprites/fx/proj_spirit_fireball.png"
 			speed = 430.0
@@ -75,7 +88,7 @@ func setup(battle_ref: Node, start_pos: Vector2, p_lane: int, p_kind: String, p_
 	_sprite.vframes = grid.y
 	_sprite.frame = 0
 	_total_frames = grid.x * grid.y
-	_sprite.scale = Vector2.ONE * (0.74 if kind == "wind" else 0.62)
+	_sprite.scale = Vector2.ONE * (0.74 if kind == "wind" else (0.56 if is_enemy_proj else 0.62))
 	if kind == "wind":
 		_sprite.modulate.a = 0.66
 	add_child(_sprite)
@@ -88,7 +101,7 @@ func _process(delta: float) -> void:
 	if max_range > 0.0:
 		step_x = minf(step_x, max_range - _traveled)
 	position.x += step_x
-	_traveled += step_x
+	_traveled += absf(step_x)
 	if kind == "wind" and max_range > 0.0:
 		if _sprite and _total_frames > 1:
 			_sprite.frame = clampi(int(clampf(_traveled / max_range, 0.0, 1.0) * float(_total_frames - 1)), 0, _total_frames - 1)
@@ -103,6 +116,28 @@ func _process(delta: float) -> void:
 
 	if _battle == null:
 		queue_free()
+		return
+
+	if is_enemy_proj:
+		var hit_def: Node = null
+		for def in _battle.get_defenders_in_lane(lane):
+			if not is_instance_valid(def) or def.is_consuming:
+				continue
+			if def.defender_id == "phu_chu" or def.defender_id == "phao_hoa":
+				continue
+			var dx: float = def.position.x
+			if dx <= previous_x + 32.0 and dx >= position.x - 32.0:
+				if hit_def == null or dx > hit_def.position.x:
+					hit_def = def
+		if hit_def != null:
+			hit_def.take_damage(damage)
+			var e_vfx := "res://assets/sprites/fx/fx_burn_flame.png" if kind == "kyubi_fire" else "res://assets/sprites/fx/fx_ice_hit_splash.png"
+			_battle.spawn_vfx(e_vfx, Vector2i(4, 3), hit_def.position + Vector2(0.0, -8.0), 20.0, 0.68)
+			AudioManager.play_sfx("hit", -10.0)
+			queue_free()
+			return
+		if position.x < -80.0:
+			queue_free()
 		return
 
 	var hit_radius := 44.0 if kind == "wind" else 34.0
@@ -130,9 +165,20 @@ func _process(delta: float) -> void:
 		first_hit.take_damage(damage, armor_piercing)
 		if slow_ratio > 0.0:
 			first_hit.apply_slow(slow_ratio, slow_duration)
-		var hit_vfx := "res://assets/sprites/fx/fx_ice_hit_splash.png" if kind == "ice" else "res://assets/sprites/fx/fx_hit_spark.png"
-		var hit_scale := 0.72 if kind == "ice" else 0.68
-		_battle.spawn_vfx(hit_vfx, Vector2i(4, 3), first_hit.position + Vector2(-10.0, -8.0), 22.0, hit_scale)
+		if kind == "phoenix":
+			for other in _battle.get_all_enemies():
+				if is_instance_valid(other) and other != first_hit and not other.is_dying():
+					if absi(other.lane - lane) <= 1 and absf(other.position.x - first_hit.position.x) <= GameData.CELL_SIZE.x * 1.45:
+						other.take_damage(damage * 0.55, false)
+			for ally in _battle.get_all_defenders():
+				if is_instance_valid(ally) and not ally.is_consuming and ally.frozen_timer > 0.0:
+					if absi(ally.row - lane) <= 1 and absf(ally.position.x - first_hit.position.x) <= GameData.CELL_SIZE.x * 1.65:
+						ally.heal(0.0)
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_burn_flame.png", Vector2i(4, 3), first_hit.position + Vector2(0.0, -8.0), 18.0, 0.85, 0.6)
+		else:
+			var hit_vfx := "res://assets/sprites/fx/fx_ice_hit_splash.png" if kind == "ice" else "res://assets/sprites/fx/fx_hit_spark.png"
+			var hit_scale := 0.72 if kind == "ice" else 0.68
+			_battle.spawn_vfx(hit_vfx, Vector2i(4, 3), first_hit.position + Vector2(-10.0, -8.0), 22.0, hit_scale)
 		AudioManager.play_sfx("hit", -11.0)
 		queue_free()
 		return

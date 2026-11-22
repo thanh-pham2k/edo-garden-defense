@@ -36,9 +36,11 @@ var poison_timer: float = 0.0
 var poison_dps: float = 0.0
 var _kb_remaining: float = 0.0
 var _kb_cooldown: float = 0.0
+var speed_buff_timer: float = 0.0
 
 var has_vaulted: bool = false
 var has_switched_lane: bool = false
+var _transformed: bool = false
 
 var _battle: Node = null
 var _data: Dictionary = {}
@@ -153,6 +155,12 @@ func apply_slow(ratio: float, duration: float) -> void:
 	slow_timer = maxf(slow_timer, duration)
 	if not had:
 		_status_display.queue_redraw()
+
+
+func apply_speed_buff(duration: float) -> void:
+	if is_dying():
+		return
+	speed_buff_timer = maxf(speed_buff_timer, duration)
 
 
 func apply_stun(duration: float) -> void:
@@ -310,6 +318,18 @@ func _process(delta: float) -> void:
 	if _kb_cooldown > 0.0:
 		_kb_cooldown = maxf(0.0, _kb_cooldown - delta)
 
+	if speed_buff_timer > 0.0:
+		speed_buff_timer = maxf(0.0, speed_buff_timer - delta)
+
+	if enemy_id == "tanuki" and not _transformed and hp > 0.0 and hp <= max_hp * 0.50:
+		_transformed = true
+		base_speed *= 1.45
+		max_armor_hp = 120.0
+		armor_hp = 120.0
+		_status_display.queue_redraw()
+		if _battle:
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_smoke_puff.png", Vector2i(4, 3), position + Vector2(0, -10), 18.0, 0.85)
+
 	if slow_timer > 0.0:
 		slow_timer = maxf(0.0, slow_timer - delta)
 		if slow_timer == 0.0:
@@ -352,7 +372,7 @@ func _process(delta: float) -> void:
 	if stun_timer > 0.0:
 		return
 
-	var speed_mult := 1.0 - slow_ratio
+	var speed_mult := maxf(0.25, (1.0 - slow_ratio) * (1.35 if speed_buff_timer > 0.0 else 1.0))
 	var anim_fps := 13.5 * speed_mult
 
 	if _state == "vault":
@@ -370,8 +390,8 @@ func _process(delta: float) -> void:
 	# Check if a defender blocks our path in this lane
 	_blocking_defender = _find_blocking_defender()
 	if _blocking_defender != null:
-		# Tengu flying leap over first blocking defender
-		if enemy_id == "tengu" and is_flying and not has_vaulted:
+		# Tengu flying leap or Karakasa one-time hop over first blocking defender/obstacle
+		if (enemy_id == "tengu" and is_flying and not has_vaulted) or (enemy_id == "karakasa" and not has_vaulted):
 			_start_vault(_blocking_defender.position.x - GameData.CELL_SIZE.x * 0.72)
 			return
 		# Rắn Ống switches lane once when blocked by a high-HP wall (Bí Ngô)
@@ -489,8 +509,10 @@ func _process_vault(delta: float) -> void:
 	var t := clampf(_vault_elapsed / 0.55, 0.0, 1.0)
 	position.x = lerpf(_vault_start_x, _vault_end_x, t)
 	if _sprite:
-		_sprite.position.y = GameData.LANE_CONTACT_OFFSET - FLIGHT_HEIGHT - sin(t * PI) * 44.0
-		_update_flying_status_position()
+		var lift := FLIGHT_HEIGHT if is_flying else 0.0
+		_sprite.position.y = GameData.LANE_CONTACT_OFFSET - lift - sin(t * PI) * 44.0
+		if is_flying:
+			_update_flying_status_position()
 	var total := _grid.x * _grid.y
 	_frame_accum += delta * 16.0
 	while _frame_accum >= 1.0:
@@ -528,25 +550,79 @@ func _switch_adjacent_lane() -> bool:
 func _try_special_skill(delta: float) -> bool:
 	if _battle == null or position.x > 1060.0:
 		return false
-	if enemy_id == "miko_ma":
-		_skill_timer += delta * (1.0 - slow_ratio)
-		if _skill_timer >= 9.5:
-			_skill_timer = 0.0
-			_state = "skill"
-			_skill_done = false
-			_set_anim(_attack_tex)
-			return true
-	elif enemy_id == "yuki_onna":
-		_skill_timer += delta * (1.0 - slow_ratio)
-		if _skill_timer >= 6.8:
-			var target := _find_freeze_target()
-			if target != null:
+	var step_delta := delta * (1.0 - slow_ratio)
+	match enemy_id:
+		"miko_ma", "boss_shogun":
+			_skill_timer += step_delta
+			var cd := 10.5 if enemy_id == "boss_shogun" else 9.5
+			if _skill_timer >= cd:
 				_skill_timer = 0.0
 				_state = "skill"
 				_skill_done = false
 				_set_anim(_attack_tex)
 				return true
+		"yuki_onna", "boss_yuki_queen":
+			_skill_timer += step_delta
+			var ycd := 7.5 if enemy_id == "boss_yuki_queen" else 6.8
+			if _skill_timer >= ycd:
+				var target := _find_freeze_target()
+				if target != null:
+					_skill_timer = 0.0
+					_state = "skill"
+					_skill_done = false
+					_set_anim(_attack_tex)
+					return true
+		"chochin_ma":
+			_skill_timer += step_delta
+			if _skill_timer >= 8.0:
+				_skill_timer = 0.0
+				_battle.drain_flame(15)
+				_battle.spawn_vfx("res://assets/sprites/fx/fx_smoke_puff.png", Vector2i(4, 3), position + Vector2(0, -14), 18.0, 0.55)
+		"kappa_phap_su", "boss_kyubi":
+			_skill_timer += step_delta
+			if enemy_id == "boss_kyubi" and not has_switched_lane and hp <= max_hp * 0.50:
+				_switch_adjacent_lane()
+				return true
+			var rcd := 6.5 if enemy_id == "boss_kyubi" else 5.5
+			if _skill_timer >= rcd and _find_lane_defender(GameData.CELL_SIZE.x * 4.8) != null:
+				_skill_timer = 0.0
+				_state = "skill"
+				_skill_done = false
+				_set_anim(_attack_tex)
+				return true
+		"boss_tengu_king":
+			_skill_timer += step_delta
+			if _skill_timer >= 8.5 and _find_lane_defender(GameData.CELL_SIZE.x * 3.5) != null:
+				_skill_timer = 0.0
+				_state = "skill"
+				_skill_done = false
+				_set_anim(_attack_tex)
+				return true
+		"boss_kappa_lord":
+			_skill_timer += step_delta
+			if _skill_timer >= 9.0 and hp < max_hp:
+				_skill_timer = 0.0
+				hp = minf(max_hp, hp + 220.0)
+				_status_display.queue_redraw()
+				_battle.spawn_vfx("res://assets/sprites/fx/fx_heal_aura.png", Vector2i(4, 3), position + Vector2(0, -10), 18.0, 0.95)
 	return false
+
+
+func _find_lane_defender(max_dist: float) -> Node:
+	if _battle == null:
+		return null
+	var best: Node = null
+	var best_x := -9999.0
+	for def in _battle.get_defenders_in_lane(lane):
+		if not is_instance_valid(def) or def.is_consuming:
+			continue
+		if def.defender_id == "phu_chu" or def.defender_id == "phao_hoa":
+			continue
+		var dx: float = position.x - def.position.x
+		if dx >= 40.0 and dx <= max_dist and def.position.x > best_x:
+			best_x = def.position.x
+			best = def
+	return best
 
 
 func _find_freeze_target() -> Node:
@@ -579,18 +655,42 @@ func _process_skill_anim(delta: float, anim_fps: float) -> void:
 func _execute_special_skill() -> void:
 	if _battle == null:
 		return
-	if enemy_id == "miko_ma":
-		_battle.spawn_vfx("res://assets/sprites/fx/fx_miko_summon_circle.png", Vector2i(4, 3), position + Vector2(0, 12), 18.0, 0.92)
-		var lanes := [clampi(lane - 1, 0, GameData.GRID_ROWS - 1), clampi(lane + 1, 0, GameData.GRID_ROWS - 1)]
-		for target_lane in lanes:
-			var spawn_pos := Vector2(clampf(position.x + 22.0, 260.0, 1140.0), GameData.cell_to_world(target_lane, 0).y)
-			_battle.spawn_vfx("res://assets/sprites/fx/fx_smoke_puff.png", Vector2i(4, 3), spawn_pos + Vector2(0, -8), 18.0, 0.72)
-			_battle.spawn_enemy("tieu_yeu", target_lane, spawn_pos.x)
-	elif enemy_id == "yuki_onna":
-		var target := _find_freeze_target()
-		if target != null and is_instance_valid(target):
-			var target_2d := target as Node2D
-			var mid_pos: Vector2 = (position + target_2d.position) * 0.5 + Vector2(0, -8)
-			_battle.spawn_vfx("res://assets/sprites/fx/fx_yuki_ice_breath.png", Vector2i(4, 3), mid_pos, 18.0, 0.88)
-			target.apply_freeze(4.5)
-			_battle.spawn_vfx("res://assets/sprites/fx/fx_freeze_overlay.png", Vector2i(4, 3), target_2d.position + Vector2(0, -8), 16.0, 0.85)
+	match enemy_id:
+		"miko_ma", "boss_shogun":
+			_battle.spawn_vfx("res://assets/sprites/fx/fx_miko_summon_circle.png", Vector2i(4, 3), position + Vector2(0, 12), 18.0, 0.92)
+			var lanes := [clampi(lane - 1, 0, GameData.GRID_ROWS - 1), clampi(lane + 1, 0, GameData.GRID_ROWS - 1)]
+			for target_lane in lanes:
+				var spawn_pos := Vector2(clampf(position.x + 22.0, 260.0, 1140.0), GameData.cell_to_world(target_lane, 0).y)
+				_battle.spawn_vfx("res://assets/sprites/fx/fx_smoke_puff.png", Vector2i(4, 3), spawn_pos + Vector2(0, -8), 18.0, 0.72)
+				_battle.spawn_enemy("tieu_yeu", target_lane, spawn_pos.x)
+		"yuki_onna":
+			var target := _find_freeze_target()
+			if target != null and is_instance_valid(target):
+				var target_2d := target as Node2D
+				var mid_pos: Vector2 = (position + target_2d.position) * 0.5 + Vector2(0, -8)
+				_battle.spawn_vfx("res://assets/sprites/fx/fx_yuki_ice_breath.png", Vector2i(4, 3), mid_pos, 18.0, 0.88)
+				target.apply_freeze(4.5)
+				_battle.spawn_vfx("res://assets/sprites/fx/fx_freeze_overlay.png", Vector2i(4, 3), target_2d.position + Vector2(0, -8), 16.0, 0.85)
+		"boss_yuki_queen":
+			var frozen := 0
+			for def in _battle.get_all_defenders():
+				if not is_instance_valid(def) or def.is_consuming or def.frozen_timer > 0.0:
+					continue
+				if absi(def.row - lane) <= 1 and def.position.x < position.x and (position.x - def.position.x) <= GameData.CELL_SIZE.x * 3.2:
+					var mid_pos: Vector2 = (position + def.position) * 0.5 + Vector2(0, -8)
+					_battle.spawn_vfx("res://assets/sprites/fx/fx_yuki_ice_breath.png", Vector2i(4, 3), mid_pos, 18.0, 0.92)
+					def.apply_freeze(4.0)
+					_battle.spawn_vfx("res://assets/sprites/fx/fx_freeze_overlay.png", Vector2i(4, 3), def.position + Vector2(0, -8), 16.0, 0.85)
+					frozen += 1
+					if frozen >= 2:
+						break
+		"kappa_phap_su":
+			_battle.spawn_projectile(position + Vector2(-28.0, -14.0), lane, "kappa_water", damage * 0.85)
+		"boss_kyubi":
+			_battle.spawn_projectile(position + Vector2(-34.0, -16.0), lane, "kyubi_fire", damage * 0.90)
+		"boss_tengu_king":
+			var target := _find_lane_defender(GameData.CELL_SIZE.x * 3.5)
+			if target != null and is_instance_valid(target):
+				_battle.spawn_vfx("res://assets/sprites/fx/fx_wind_gust.png", Vector2i(4, 3), position + Vector2(-50.0, -8.0), 18.0, 0.95, 0.0, Vector2(-180.0, 0.0))
+				target.take_damage(damage * 0.65)
+				target.apply_freeze(2.0)

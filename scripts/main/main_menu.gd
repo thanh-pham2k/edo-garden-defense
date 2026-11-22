@@ -230,7 +230,7 @@ func _build_ui() -> void:
 	left_v.add_child(ch_top)
 
 	var ch_title := Label.new()
-	ch_title.text = "CHỌN CHƯƠNG CHIẾN DỊCH (5 MÀN)"
+	ch_title.text = "CHỌN MÀN CHIẾN DỊCH (%d MÀN)" % GameData.LEVELS.size()
 	ch_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ch_title.add_theme_font_size_override("font_size", 18)
 	ch_title.add_theme_color_override("font_color", Color(0.36, 0.14, 0.08))
@@ -239,18 +239,28 @@ func _build_ui() -> void:
 	var unlock_btn := Button.new()
 	unlock_btn.text = "Mở khóa hết"
 	unlock_btn.add_theme_font_size_override("font_size", 12)
-	unlock_btn.tooltip_text = "Mở khóa toàn bộ 5 chương để chơi thử ngay"
+	unlock_btn.tooltip_text = "Mở khóa toàn bộ %d màn để chơi thử ngay" % GameData.LEVELS.size()
 	unlock_btn.pressed.connect(_on_unlock_all)
 	ch_top.add_child(unlock_btn)
+
+	var ch_scroll := ScrollContainer.new()
+	ch_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	ch_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left_v.add_child(ch_scroll)
+
+	var ch_list := VBoxContainer.new()
+	ch_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ch_list.add_theme_constant_override("separation", 6)
+	ch_scroll.add_child(ch_list)
 
 	for lvl in GameData.LEVELS:
 		var lid := int(lvl["id"])
 		var btn := _create_level_row(lvl)
 		btn.pressed.connect(_on_select_level.bind(lid))
-		left_v.add_child(btn)
+		ch_list.add_child(btn)
 		_level_buttons.append(btn)
 
-	# Right Column: Defender Deck Picker (10 Defenders -> pick up to 8)
+	# Right Column: Defender Deck Picker (14 Defenders -> pick up to 8)
 	var right_panel := _make_washi_panel(Color(0.97, 0.91, 0.78, 0.94), Color(0.50, 0.28, 0.10, 1.0))
 	right_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_panel.size_flags_stretch_ratio = 1.15
@@ -276,7 +286,7 @@ func _build_ui() -> void:
 	deck_hdr.add_child(_deck_count_label)
 
 	var grid := GridContainer.new()
-	grid.columns = 5
+	grid.columns = 7
 	grid.add_theme_constant_override("h_separation", 8)
 	grid.add_theme_constant_override("v_separation", 8)
 	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -565,6 +575,7 @@ func _refresh_ui() -> void:
 	var tex_current := load("res://assets/sprites/ui/ui_node_current.png") as Texture2D
 	var tex_locked := load("res://assets/sprites/ui/ui_node_locked.png") as Texture2D
 	var tex_boss := load("res://assets/sprites/ui/ui_node_boss.png") as Texture2D
+	var tex_ch6_emblem := load("res://assets/sprites/ui/ui_ch6_emblem.png") as Texture2D
 	var tex_star_on := load("res://assets/sprites/ui/ui_star_earned.png") as Texture2D
 	var tex_star_off := load("res://assets/sprites/ui/ui_star_empty.png") as Texture2D
 
@@ -576,9 +587,11 @@ func _refresh_ui() -> void:
 		var node_icon := btn.find_child("NodeIcon", true, false) as TextureRect
 		if not unlocked:
 			node_icon.texture = tex_locked
+		elif lid == GameData.LEVELS.size() and tex_ch6_emblem:
+			node_icon.texture = tex_ch6_emblem
 		elif lid == GameData.selected_level:
 			node_icon.texture = tex_current
-		elif lid == GameData.LEVELS.size():
+		elif lid % 3 == 0:
 			node_icon.texture = tex_boss
 		else:
 			node_icon.texture = tex_unlocked

@@ -88,8 +88,11 @@ func _run_all_tests() -> void:
 		_assert(ResourceLoader.exists(lvl["ambient_particle"]), "Missing ambient particle for level %d" % lvl["id"])
 		_assert(ResourceLoader.exists(lvl["top_border"]), "Missing top_border for level %d" % lvl["id"])
 		_assert(ResourceLoader.exists(lvl["lawn_edge"]), "Missing lawn_edge for level %d" % lvl["id"])
-		var scenery_paths := [lvl["house_tex"], lvl["gate_tex"],
-			lvl.get("stone_path_tex", "res://assets/sprites/environments/env_path_stepping_stones.png")]
+		_assert(not lvl.has("gate_tex"), "Level %d omits its gate" % lvl["id"])
+		var scenery_paths := [
+			lvl["house_tex"],
+			lvl.get("stone_path_tex", "res://assets/sprites/environments/env_path_stepping_stones.png"),
+		]
 		scenery_paths.append_array(lvl["biome_flora"])
 		for scenery_path: String in scenery_paths:
 			var texture := load(scenery_path) as Texture2D
@@ -142,6 +145,21 @@ func _run_all_tests() -> void:
 		"res://assets/sprites/tiles/water_lily_pad.png",
 		"res://assets/sprites/tiles/water_lily_lotus.png",
 		"res://assets/sprites/tiles/water_splash_ring.png",
+		"res://assets/sprites/tiles/koi_kohaku_swim.png",
+		"res://assets/sprites/tiles/koi_yamabuki_swim.png",
+		"res://assets/sprites/ui/ui_ch6_emblem.png",
+		"res://assets/sprites/fx/proj_phoenix_fireball.png",
+		"res://assets/sprites/fx/fx_chain_lightning_arc.png",
+		"res://assets/sprites/fx/fx_daruma_buff_ring.png",
+		"res://assets/sprites/fx/fx_katana_slash_wave.png",
+		"res://assets/sprites/fx/proj_kappa_water_orb.png",
+		"res://assets/sprites/fx/proj_kyubi_foxfire.png",
+		"res://assets/sprites/environments/env_border_top_ch6.png",
+		"res://assets/sprites/environments/house_ch6_fire_shrine.png",
+		"res://assets/sprites/environments/gate_ch6_volcano_torii.png",
+		"res://assets/sprites/tiles/tile_volcanic_stone_0.png",
+		"res://assets/sprites/tiles/tile_ember_gravel_1.png",
+		"res://assets/sprites/backgrounds/bg_ch6_blood_moon_shrine_0.png",
 	]:
 		_assert(ResourceLoader.exists(extra_path), "Missing adapted sprite " + extra_path)
 
@@ -152,18 +170,32 @@ func _run_all_tests() -> void:
 	await process_frame
 	_assert(menu.is_inside_tree(), "MainMenu enters tree cleanly")
 	game_data.unlock_all_levels()
-	_assert(game_data.unlocked_level == 5, "All 5 levels unlock cleanly")
+	_assert(game_data.unlocked_level == 24 and game_data.LEVELS.size() == 24, "All 24 levels unlock cleanly")
+	_assert(game_data.get_level_config(21)["waves"].size() == 10, "Marathon stage 7-3 has 10 waves")
+	_assert(game_data.get_level_config(24)["waves"].size() == 12, "Final marathon stage 8-3 has 12 waves")
 	menu.queue_free()
 	await process_frame
 
-	# 3. Test BattleScene on Chapter 3 (Koi Pond water_lane = 2)
-	game_data.selected_level = 3
+	# 3. Test BattleScene on Chapter 3-1 (Koi Pond level 7, water_lane = 2)
+	game_data.selected_level = 7
 	var battle_scene := load("res://scenes/battle/BattleScene.tscn") as PackedScene
 	var battle := battle_scene.instantiate()
 	root.add_child(battle)
 	await process_frame
 	_assert(battle.is_water_lane(2), "Chapter 3 lane 2 is Koi water lane")
 	_assert(battle.get_all_obstacles().size() == 4, "Chapter 3 spawns its 4 configured obstacles")
+	_check_pond_koi(battle)
+
+	for obstacle_id in ["obs_wood_fence", "obs_crate"]:
+		var obstacle = battle.spawn_obstacle(obstacle_id, 4, 7)
+		_assert(obstacle._sprite.frame == 0, "%s starts intact" % obstacle_id)
+		obstacle.take_damage(obstacle.max_hp * 0.4)
+		_assert(obstacle._sprite.frame == 1, "%s shows cracks" % obstacle_id)
+		obstacle.take_damage(obstacle.max_hp * 0.4)
+		_assert(obstacle._sprite.frame == 2, "%s shows heavy damage" % obstacle_id)
+		obstacle.take_damage(obstacle.max_hp * 0.25)
+		_assert(obstacle._sprite.frame == 3 and battle.can_plant_at(4, 7, "dao_tien"),
+			"%s shows debris and immediately frees its tile" % obstacle_id)
 
 	for level in game_data.LEVELS:
 		_assert(float(level["waves"][0]["delay"]) >= 26.0, "Chapter %d has at least 13 real seconds at 5x" % level["id"])
@@ -328,6 +360,44 @@ func _run_all_tests() -> void:
 	_assert(neko != null and miko != null and yuki != null and ran != null, "All remaining Yokai types spawn cleanly")
 	miko._execute_special_skill()
 	_assert(battle.get_enemies_in_lane(0).size() >= 2, "Miko Ma summons Tiểu Yêu into adjacent lanes")
+
+	# Test expansion Defenders, Yokai, Bosses & Obstacles
+	var d_hoa = battle.try_plant_defender("hoa_phuong", 1, 2, -1, true)
+	var d_daruma = battle.try_plant_defender("daruma_buff", 1, 3, -1, true)
+	var d_meo = battle.try_plant_defender("meo_kiem", 0, 3, -1, true)
+	var d_sam = battle.try_plant_defender("cung_sam", 2, 3, -1, true)
+	_assert(d_hoa != null and d_daruma != null and d_meo != null and d_sam != null, "All 4 new expansion defenders plant cleanly")
+	d_daruma._execute_action_effect()
+	_assert(d_hoa.haste_timer >= 5.5 and d_meo.haste_timer >= 5.5, "Daruma Cổ Vũ hastes 3x3 allies cleanly")
+	var slash_target = battle.spawn_enemy("tieu_yeu", 0, d_meo.position.x + 80.0)
+	d_meo._execute_action_effect()
+	_assert(slash_target.hp < slash_target.max_hp, "Mèo Kiếm Sĩ slashes enemies in range")
+	var sam_t1 = battle.spawn_enemy("oni_nho", 2, d_sam.position.x + 45.0)
+	var sam_t2 = battle.spawn_enemy("oni_nho", 2, d_sam.position.x + 80.0)
+	d_sam._execute_action_effect()
+	_assert(sam_t1.hp < sam_t1.max_hp and sam_t2.hp < sam_t2.max_hp and sam_t1.stun_timer > 0.0, "Cung Thủ Sấm chains lightning across targets")
+
+	var karakasa = battle.spawn_enemy("karakasa", 0, 760.0)
+	var chochin = battle.spawn_enemy("chochin_ma", 1, 760.0)
+	var tanuki = battle.spawn_enemy("tanuki", 2, 760.0)
+	var k_mage = battle.spawn_enemy("kappa_phap_su", 3, 760.0)
+	_assert(karakasa != null and chochin.is_flying and tanuki != null and k_mage != null, "All 4 new Yokai spawn cleanly")
+	tanuki.take_damage(tanuki.max_hp * 0.6, true)
+	tanuki._process(0.05)
+	_assert(tanuki._transformed and tanuki.armor_hp > 0.0, "Tanuki transforms at <=50% HP gaining armor and speed")
+	k_mage._execute_special_skill()
+	for boss_id in ["boss_tengu_king", "boss_kappa_lord", "boss_shogun", "boss_yuki_queen", "boss_kyubi"]:
+		var b_unit = battle.spawn_enemy(boss_id, 4, 920.0)
+		_assert(b_unit != null and b_unit.is_boss, "Boss %s spawns cleanly" % boss_id)
+		b_unit._execute_special_skill()
+		b_unit.queue_free()
+	var obs_ice = battle.spawn_obstacle("obs_ice_block", 0, 7)
+	var obs_curse = battle.spawn_obstacle("obs_cursed_lantern", 1, 7)
+	var obs_incense = battle.spawn_obstacle("obs_incense_burner", 3, 7)
+	_assert(obs_ice != null and obs_curse != null and obs_incense != null, "All 3 new obstacles spawn cleanly")
+	obs_ice.destroy(true)
+	obs_incense.destroy(true)
+	obs_curse.destroy(false)
 
 	# Test Komainu Guardian last-line sweep
 	var breach_enemy = battle.spawn_enemy("tieu_yeu", 0, game_data.GRID_ORIGIN.x - 16.0)
@@ -496,3 +566,34 @@ func _run_all_tests() -> void:
 		for f in _failures:
 			print("  - " + f)
 		quit(1)
+
+
+func _check_pond_koi(battle: Node) -> void:
+	var fish: Array[Sprite2D] = battle._pond_koi
+	_assert(fish.size() >= 3, "The pond has a moving shoal")
+	var headings: Array[float] = []
+	var positions: Array[Vector2] = []
+	var total_turn: Array[float] = []
+	var continuous := true
+	var visible_area := Rect2(186, 364, 1020, 80)
+	var original_time: float = battle._pond_koi_time
+	for koi in fish:
+		headings.append(koi.rotation)
+		positions.append(koi.position)
+		total_turn.append(0.0)
+	for sample in range(33 * 60):
+		battle._update_pond_koi(1.0 / 60.0)
+		for i in fish.size():
+			var koi := fish[i]
+			var turn := angle_difference(headings[i], koi.rotation)
+			continuous = continuous and absf(turn) < 0.20
+			continuous = continuous and visible_area.has_point(koi.position)
+			continuous = continuous and koi.position.distance_to(positions[i]) < 2.0
+			total_turn[i] += turn
+			headings[i] = koi.rotation
+			positions[i] = koi.position
+	_assert(continuous, "Koi turn continuously at 60 Hz and stay inside the pond")
+	_assert(not total_turn.is_empty() and absf(total_turn[0]) >= TAU - 0.1,
+		"An oval-swimming koi turns a full 360 degrees")
+	battle._pond_koi_time = original_time
+	battle._update_pond_koi(0.0)

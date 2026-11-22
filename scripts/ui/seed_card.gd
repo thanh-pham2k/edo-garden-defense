@@ -6,6 +6,8 @@ class_name SeedCard
 signal card_pressed(defender_id: String, index: int)
 signal card_drag_started(defender_id: String, index: int, viewport_pos: Vector2)
 
+const DISABLE_CARD_COOLDOWN: bool = true
+
 var defender_id: String = ""
 var card_index: int = 0
 var cost: int = 100
@@ -34,7 +36,7 @@ func setup(p_id: String, p_idx: int) -> void:
 	card_index = p_idx
 	var data: Dictionary = GameData.DEFENDERS[p_id]
 	cost = int(data["cost"])
-	cooldown_total = float(data["cooldown"]) * GameData.get_cooldown_mult()
+	cooldown_total = 0.0 if DISABLE_CARD_COOLDOWN else float(data["cooldown"]) * GameData.get_cooldown_mult()
 	cooldown_left = 0.0
 
 	custom_minimum_size = Vector2(84.0, 106.0)
@@ -100,8 +102,9 @@ func is_ready_to_plant(current_flame: int) -> bool:
 
 
 func start_cooldown() -> void:
-	cooldown_left = cooldown_total
-	is_selected = false
+	cooldown_left = 0.0 if DISABLE_CARD_COOLDOWN else cooldown_total
+	if cooldown_left > 0.0:
+		is_selected = false
 	_refresh_visual()
 
 

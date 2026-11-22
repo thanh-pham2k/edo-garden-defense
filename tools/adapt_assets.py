@@ -452,6 +452,32 @@ def adapt_background_sheet(img_arr: np.ndarray, canonical_name: str):
         p_img.save(os.path.join(out_dir, f"{stem}_{idx}.png"))
 
 
+def compose_pond_koi_atlas(tiles_dir: str):
+    """Compose the 8x3 (1024x384) swimming Koi atlas from kohaku & yamabuki 4x2 sheets."""
+    kohaku_p = os.path.join(tiles_dir, "koi_kohaku_swim.png")
+    yamabuki_p = os.path.join(tiles_dir, "koi_yamabuki_swim.png")
+    if not (os.path.exists(kohaku_p) and os.path.exists(yamabuki_p)):
+        return
+    kohaku = Image.open(kohaku_p).convert("RGBA")
+    yamabuki = Image.open(yamabuki_p).convert("RGBA")
+    cs = 128
+    atlas = Image.new("RGBA", (8 * cs, 3 * cs), (0, 0, 0, 0))
+    for i in range(8):
+        cx, cy = (i % 4) * cs, (i // 4) * cs
+        kf = kohaku.crop((cx, cy, cx + cs, cy + cs))
+        yf = yamabuki.crop((cx, cy, cx + cs, cy + cs))
+        atlas.paste(kf, (i * cs, 0), kf)
+        atlas.paste(yf, (i * cs, cs), yf)
+        # 3rd variant: warmer vermilion-apricot koi tint from kohaku
+        arr = np.array(kf).astype(np.float32)
+        arr[:, :, 0] = np.clip(arr[:, :, 0] * 1.06, 0, 255)
+        arr[:, :, 1] = np.clip(arr[:, :, 1] * 0.78, 0, 255)
+        arr[:, :, 2] = np.clip(arr[:, :, 2] * 0.64, 0, 255)
+        var_f = Image.fromarray(arr.astype(np.uint8))
+        atlas.paste(var_f, (i * cs, 2 * cs), var_f)
+    atlas.save(os.path.join(tiles_dir, "env_koi_water_anim.png"))
+
+
 def adapt_all(from_archive: bool = False):
     for sub in ["defenders", "enemies", "tiles", "obstacles", "props", "fx", "ui", "backgrounds", "items", "environments"]:
         os.makedirs(os.path.join(SPRITES_DIR, sub), exist_ok=True)
@@ -497,18 +523,64 @@ def adapt_all(from_archive: bool = False):
         if cname.startswith("tile_"):
             adapt_tile_sheet(img_arr, cname)
 
-        # 1b. Obstacles (6 files, 2x2 damage states)
+        # 1b. Obstacles (2x2 damage states, including Edo replacements & expansion obstacles)
         elif cname.startswith("obs_"):
             out_dir = os.path.join(SPRITES_DIR, "obstacles")
-            cells = extract_cells(img_arr, 2, 2, cname)
+            obs_rename = {
+                "obs_edo_fence_34.png": "obs_wood_fence.png",
+                "obs_edo_crate_kibako.png": "obs_crate.png",
+                "obs_new_ice_block.png": "obs_ice_block.png",
+                "obs_new_cursed_lantern.png": "obs_cursed_lantern.png",
+                "obs_new_incense_burner.png": "obs_incense_burner.png",
+            }
+            out_name = obs_rename.get(cname, cname)
+            hole_set = {0, 1, 2, 3} if out_name in {"obs_wood_fence.png", "obs_crate.png", "obs_spike_barricade.png"} else None
+            cells = extract_cells(img_arr, 2, 2, cname, hole_cells=hole_set)
             sheet, _ = normalize_sheet(cells, 2, 2, 128, anchor="bottom-center", max_content_ratio=0.88)
-            sheet.save(os.path.join(out_dir, cname))
+            sheet.save(os.path.join(out_dir, out_name))
 
-        # 1c. Backgrounds (5 files, 2x2 16:9 panels)
+        # 1b2. Chapter 6 volcanic obsidian & ember gravel floor tiles (3x2 -> 2 stems x 6 variants 0..5)
+        elif cname == "tiles_ch6_obsidian_ash.png":
+            cols, rows = 3, 2
+            row_xs, ys = find_grid_cuts(img_arr, cols, rows, per_row_cols=True)
+            tile_size = 128
+            out_dir = os.path.join(SPRITES_DIR, "tiles")
+            extracted = []
+            for r in range(rows):
+                xs = row_xs[r]
+                for c in range(cols):
+                    sub = img_arr[ys[r]:ys[r + 1], xs[c]:xs[c + 1]]
+                    rgba = remove_background(sub, cname)
+                    b = trim_alpha_bbox(rgba, alpha_thresh=40)
+                    if b is None:
+                        tile = Image.new("RGBA", (tile_size, tile_size), (68, 56, 66, 255))
+                    else:
+                        x0, y0, x1, y1 = b
+                        pw, ph = x1 - x0, y1 - y0
+                        ix = max(2, int(round(pw * 0.055)))
+                        iy = max(2, int(round(ph * 0.055)))
+                        core = rgba[y0 + iy:y1 - iy, x0 + ix:x1 - ix]
+                        alpha_ok = core[:, :, 3] > 200
+                        if not np.all(alpha_ok) and np.any(alpha_ok):
+                            _, indices = ndimage.distance_transform_edt(~alpha_ok, return_indices=True)
+                            core_rgb = core[:, :, :3][indices[0], indices[1]]
+                            core = np.dstack([core_rgb, np.full(core_rgb.shape[:2], 255, dtype=np.uint8)])
+                        else:
+                            core[:, :, 3] = 255
+                        tile = Image.fromarray(core).resize((tile_size, tile_size), Image.Resampling.LANCZOS)
+                    extracted.append(tile)
+            for stem, group in [("tile_volcanic_stone", extracted[0:3]), ("tile_ember_gravel", extracted[3:6])]:
+                for i in range(6):
+                    t_img = group[i % 3]
+                    if i >= 3:
+                        t_img = t_img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                    t_img.save(os.path.join(out_dir, f"{stem}_{i}.png"))
+
+        # 1c. Backgrounds (2x2 16:9 panels)
         elif cname.startswith("bg_"):
             adapt_background_sheet(img_arr, cname)
 
-        # 2. Defenders (18 files)
+        # 2. Defenders (base + 4 expansion defenders)
         elif cname in {
             "dao_tien_idle.png", "dao_tien_attack.png",
             "tre_no_idle.png", "tre_no_attack.png",
@@ -520,6 +592,10 @@ def adapt_all(from_archive: bool = False):
             "phu_chu_idle_trigger.png",
             "gio_loc_idle.png", "gio_loc_blow.png",
             "chua_lanh_idle.png", "chua_lanh_heal.png",
+            "hoa_phuong_idle.png", "hoa_phuong_attack.png",
+            "daruma_buff_idle.png", "daruma_buff_action.png",
+            "meo_kiem_idle.png", "meo_kiem_attack.png",
+            "cung_sam_idle.png", "cung_sam_attack.png",
         }:
             out_dir = os.path.join(SPRITES_DIR, "defenders")
             if cname == "phao_hoa_explode.png":
@@ -536,13 +612,23 @@ def adapt_all(from_archive: bool = False):
                 did = defenders_icon_sources[cname]
                 frames[0].save(os.path.join(out_dir, f"{did}_icon.png"))
 
-        # 3. Enemies (30 files)
+        elif cname == "defenders_new_icons_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "defenders")
+            cells = extract_cells(img_arr, 2, 2, cname)
+            names = [
+                "hoa_phuong_icon.png", "daruma_buff_icon.png",
+                "meo_kiem_icon.png", "cung_sam_icon.png",
+            ]
+            for c_rgba, iname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, iname), size=128, anchor="bottom-center")
+
+        # 3. Enemies & Bosses (base + 4 new Yokai + 5 Chapter Bosses)
         elif cname.endswith(("_walk.png", "_attack.png", "_die.png", "_fly.png", "_summon.png", "_cast.png")):
             out_dir = os.path.join(SPRITES_DIR, "enemies")
-            if cname.startswith("oni_lon_"):
+            if cname.startswith(("oni_lon_", "boss_")):
                 cells = extract_cells(img_arr, 4, 4, cname)
                 sheet, frames = normalize_sheet(cells, 4, 4, 192, anchor="bottom-center", max_content_ratio=0.90, margin_bottom=8)
-            elif cname.startswith("tengu_"):
+            elif cname.startswith(("tengu_", "chochin_ma_")):
                 cells = extract_cells(img_arr, 4, 3, cname)
                 sheet, frames = normalize_sheet(cells, 4, 3, 128, anchor="center", max_content_ratio=0.88)
             else:
@@ -552,6 +638,28 @@ def adapt_all(from_archive: bool = False):
             if cname in enemies_icon_sources:
                 eid = enemies_icon_sources[cname]
                 frames[0].save(os.path.join(out_dir, f"{eid}_icon.png"))
+
+        elif cname == "enemies_new_icons_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "enemies")
+            cells = extract_cells(img_arr, 2, 2, cname)
+            names = [
+                "karakasa_icon.png", "chochin_ma_icon.png",
+                "tanuki_icon.png", "kappa_phap_su_icon.png",
+            ]
+            for c_rgba, iname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, iname), size=128, anchor="bottom-center")
+
+        elif cname == "bosses_icons_pack.png":
+            enemies_dir = os.path.join(SPRITES_DIR, "enemies")
+            ui_dir = os.path.join(SPRITES_DIR, "ui")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            boss_names = [
+                "boss_tengu_king_icon.png", "boss_kappa_lord_icon.png", "boss_shogun_icon.png",
+                "boss_yuki_queen_icon.png", "boss_kyubi_icon.png",
+            ]
+            for c_rgba, bname in zip(cells[:5], boss_names):
+                save_single_trimmed(c_rgba, os.path.join(enemies_dir, bname), size=128, anchor="bottom-center")
+            save_single_trimmed(cells[5], os.path.join(ui_dir, "ui_ch6_emblem.png"), size=128, anchor="center")
 
         # 4. Props (4 files)
         elif cname == "props_architecture_pack.png":
@@ -621,6 +729,16 @@ def adapt_all(from_archive: bool = False):
             cells = extract_cells(img_arr, 4, 4, cname)
             sheet, _ = normalize_sheet(cells, 4, 4, 192, anchor="center", max_content_ratio=0.92)
             sheet.save(os.path.join(out_dir, cname))
+
+        elif cname == "fx_expansion_projectiles_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "fx")
+            cells = extract_cells(img_arr, 3, 2, cname)
+            names = [
+                "proj_phoenix_fireball.png", "fx_chain_lightning_arc.png", "fx_daruma_buff_ring.png",
+                "fx_katana_slash_wave.png", "proj_kappa_water_orb.png", "proj_kyubi_foxfire.png",
+            ]
+            for c_rgba, fname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, fname), size=128, anchor="center")
 
         elif cname.startswith("fx_"):
             out_dir = os.path.join(SPRITES_DIR, "fx")
@@ -820,6 +938,30 @@ def adapt_all(from_archive: bool = False):
             for c_rgba, wname in zip(cells, names):
                 save_single_trimmed(c_rgba, os.path.join(out_dir, wname), size=128, anchor="center")
 
+        elif cname == "env_compact_gates_6ch_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "environments")
+            cells = extract_cells(img_arr, 3, 2, cname, hole_cells={0, 1, 2, 3, 4, 5})
+            names = [
+                "gate_ch1_sakura_torii.png", "gate_ch2_bamboo.png", "gate_ch3_night_torii.png",
+                "gate_ch4_castle_gate.png", "gate_ch5_snow_torii.png", "gate_ch6_volcano_torii.png",
+            ]
+            for c_rgba, gname in zip(cells, names):
+                save_single_trimmed(c_rgba, os.path.join(out_dir, gname), size=256, anchor="bottom-center")
+
+        elif cname == "env_ch6_border_house_flora_pack.png":
+            out_dir = os.path.join(SPRITES_DIR, "environments")
+            cells = extract_cells(img_arr, 2, 2, cname, hole_cells={0})
+            save_proportional_trimmed(cells[0], os.path.join(out_dir, "env_border_top_ch6.png"), target_height=160)
+            save_single_trimmed(cells[1], os.path.join(out_dir, "house_ch6_fire_shrine.png"), size=256, anchor="bottom-center")
+            save_single_trimmed(cells[2], os.path.join(out_dir, "flora_ch6_ember_maple.png"), size=256, anchor="bottom-center")
+            save_proportional_trimmed(cells[3], os.path.join(out_dir, "env_edge_volcanic_curb.png"), target_height=112)
+
+        elif cname in {"koi_kohaku_swim.png", "koi_yamabuki_swim.png"}:
+            out_dir = os.path.join(SPRITES_DIR, "tiles")
+            cells = extract_cells(img_arr, 4, 2, cname)
+            sheet, _ = normalize_sheet(cells, 4, 2, 128, anchor="center", max_content_ratio=0.86)
+            sheet.save(os.path.join(out_dir, cname))
+
         elif cname == "env_koi_water_anim.png":
             out_dir = os.path.join(SPRITES_DIR, "tiles")
             adapt_animated_tile_sheet(img_arr, 4, 3, 128, os.path.join(out_dir, cname))
@@ -857,6 +999,7 @@ def adapt_all(from_archive: bool = False):
         adapted_count += 1
         print(f"Adapted [{adapted_count}/{len(raw_files)}]: {cname}")
 
+    compose_pond_koi_atlas(os.path.join(SPRITES_DIR, "tiles"))
     print(f"Done! Adapted {adapted_count} sheets.")
 
 

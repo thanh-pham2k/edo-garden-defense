@@ -14,7 +14,7 @@ config/name="Edo Garden Defense"
 config/description="Lane-based Tower Defense inspired by Plants vs. Zombies in a Japanese Edo Yokai setting."
 run/main_scene="res://scenes/main/MainMenu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
-config/icon="res://icon.svg"
+config/icon="res://assets/sprites/ui/ui_app_icon.png"
 
 [autoload]
 

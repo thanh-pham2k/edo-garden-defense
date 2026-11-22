@@ -5,6 +5,9 @@ extends Node2D
 const BATTLEFIELD_TILE_SHADER := preload("res://assets/shaders/battlefield_tiles.gdshader")
 const SCENERY := preload("res://scripts/battle/scenery.gd")
 const POND_BRIDGE_X := 88.0
+const KOI_ATLAS := preload("res://assets/sprites/tiles/env_koi_water_anim.png")
+const KOI_TAIL_FRAMES := 8
+const KOI_VARIANTS := 3
 const FENCE_TILE_ORIGIN_X := -420.0
 const BACKDROP_OVERSCAN := 24.0
 const BATTLEFIELD_REFERENCE_SIZE := Vector2(1280.0, 720.0)
@@ -138,6 +141,9 @@ var _shake_timer: float = 0.0
 var _ambient_particles: Array[Dictionary] = []
 var _water_material: ShaderMaterial
 var _pond_koi: Array[Sprite2D] = []
+var _pond_koi_time := 0.0
+var _pond_koi_center := Vector2.ZERO
+var _pond_koi_span := 0.0
 var _atmo_nodes: Array[Dictionary] = []
 var _flora_nodes: Array[Dictionary] = []
 var _glow_nodes: Array[Dictionary] = []
@@ -230,22 +236,45 @@ func _build_terrain(water_lane: int) -> ColorRect:
 
 
 func _build_pond_koi(water_lane: int) -> void:
-	var material := ShaderMaterial.new()
-	material.shader = preload("res://assets/shaders/pond_koi.gdshader")
-	var atlas := preload("res://assets/sprites/tiles/env_koi_water_anim.png")
-	var lane_y := GameData.cell_to_world(water_lane, 0).y
-	for x in [457.0, 786.0, 1042.0]:
+	var left := GameData.GRID_ORIGIN.x - 32.0
+	var right := GameData.GRID_ORIGIN.x + GameData.GRID_COLS * GameData.CELL_SIZE.x + 100.0
+	_pond_koi_center = Vector2((left + right) * 0.5, GameData.cell_to_world(water_lane, 0).y)
+	_pond_koi_span = (right - left) * 0.5
+	for i in range(6):
 		var koi := Sprite2D.new()
-		koi.texture = atlas
-		koi.hframes = 4
-		koi.vframes = 3
-		koi.position = Vector2(x, lane_y)
-		koi.scale = Vector2.ONE * 0.68
-		koi.material = material
-		koi.modulate = Color(0.77, 0.87, 0.92, 0.76)
+		koi.texture = KOI_ATLAS
+		koi.hframes = KOI_TAIL_FRAMES
+		koi.vframes = KOI_VARIANTS
+		koi.scale = Vector2.ONE * (0.46 + 0.04 * (i % KOI_VARIANTS))
+		koi.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		koi.modulate = Color(0.84, 0.93, 0.98, 0.80) if i < 3 else Color(0.76, 0.87, 0.95, 0.69)
 		koi.z_index = 4
 		_world_root.add_child(koi)
 		_pond_koi.append(koi)
+	_update_pond_koi(0.0)
+
+
+func _update_pond_koi(real_delta: float) -> void:
+	_pond_koi_time += real_delta
+	for i in range(_pond_koi.size()):
+		var koi := _pond_koi[i]
+		# Two overlapping shoals cover the length of the pond on oval and figure-eight paths.
+		var oval := i < 3
+		var radius_x := _pond_koi_span * (0.59 if oval else 0.57)
+		var radius_y := 19.0 if oval else 17.0
+		var center_x := _pond_koi_span - radius_x
+		var period := 30.0 if oval else 33.0
+		var phase := fposmod(_pond_koi_time / period + float(i % 3) / 3.0 + (0.0 if oval else 0.14), 1.0) * TAU
+		# Ease the phase at the narrow ends so the fish turn gradually.
+		var angle := phase - 0.23 * sin(2.0 * phase)
+		var vertical := angle if oval else 2.0 * angle
+		koi.position = _pond_koi_center + Vector2(
+			(-center_x if oval else center_x) + radius_x * cos(angle),
+			radius_y * sin(vertical))
+		var tangent := Vector2(-radius_x * sin(angle), radius_y * cos(vertical) * (1.0 if oval else 2.0))
+		koi.rotation = tangent.angle()
+		var tail_frame := posmod(floori(_pond_koi_time * 12.0) + i * 3, KOI_TAIL_FRAMES)
+		koi.frame_coords = Vector2i(tail_frame, i % KOI_VARIANTS)
 
 
 func _build_side_gardens(water_lane: int, atmo_style: String, yard_tint: Color) -> void:
@@ -257,7 +286,7 @@ func _build_side_gardens(water_lane: int, atmo_style: String, yard_tint: Color) 
 		Vector3(54, 312, 74),
 		Vector3(107, 579, 61),
 		Vector3(1207, 302, 63),
-		Vector3(1241, 566, 76),
+		Vector3(1141, 523, 65),
 	]
 	for index in range(stone_spots.size()):
 		var spot: Vector3 = stone_spots[index]
@@ -281,22 +310,18 @@ func _build_side_gardens(water_lane: int, atmo_style: String, yard_tint: Color) 
 		_flora_nodes.append({"node": prop, "phase": float(index) * 1.7})
 
 	var house_foot := Vector2(80, 529 if pond else 466)
-	var gate_foot := Vector2(1218, 488 if pond else 470)
 	scenery.place(_world_root, level_cfg["house_tex"], house_foot, 145.0, 12)
-	scenery.place(_world_root, level_cfg["gate_tex"], gate_foot, 100.0, 12)
 
 	_glow_nodes.clear()
 	if atmo_style != "day":
-		var glow_tex := preload("res://assets/sprites/environments/env_atmo_lantern_glow.png")
-		for anchor in [house_foot + Vector2(9, -35), gate_foot + Vector2(-23, -49), gate_foot + Vector2(23, -49)]:
-			var glow := Sprite2D.new()
-			glow.texture = glow_tex
-			glow.position = anchor
-			glow.scale = Vector2.ONE * 0.33
-			glow.modulate = Color(1.0, 0.90, 0.70, 0.27)
-			glow.z_index = 13
-			_world_root.add_child(glow)
-			_glow_nodes.append({"node": glow, "phase": anchor.x * 0.01})
+		var glow := Sprite2D.new()
+		glow.texture = preload("res://assets/sprites/environments/env_atmo_lantern_glow.png")
+		glow.position = house_foot + Vector2(9, -35)
+		glow.scale = Vector2.ONE * 0.33
+		glow.modulate = Color(1.0, 0.90, 0.70, 0.27)
+		glow.z_index = 13
+		_world_root.add_child(glow)
+		_glow_nodes.append({"node": glow, "phase": glow.position.x * 0.01})
 
 
 func _build_backdrop(water_lane: int) -> void:
@@ -565,7 +590,7 @@ func _build_atmosphere_effects(style: String) -> void:
 				if ff_tex:
 					var fs := Sprite2D.new()
 					fs.texture = ff_tex
-					fs.position = Vector2(106.0 + i * 1090.0, 289.0 + i * 230.0)
+					fs.position = Vector2(106, 289) if i == 0 else Vector2(1218, 318)
 					fs.scale = Vector2(0.52, 0.52)
 					fs.modulate.a = 0.44
 					_ambient_layer.add_child(fs)
@@ -602,6 +627,27 @@ func _build_atmosphere_effects(style: String) -> void:
 					ws.modulate.a = 0.28
 					_ambient_layer.add_child(ws)
 					_atmo_nodes.append({"node": ws, "kind": "drift", "vx": -62.0 - float(i) * 10.0, "vy": 8.0, "base_a": 0.45, "phase": float(i)})
+		"volcano":
+			var mist_tex := load("res://assets/sprites/environments/env_atmo_mist.png") as Texture2D
+			var ff_tex := load("res://assets/sprites/environments/env_atmo_fireflies.png") as Texture2D
+			for i in range(3):
+				if mist_tex:
+					var ms := Sprite2D.new()
+					ms.texture = mist_tex
+					ms.position = Vector2(180.0 + i * 440.0, 200.0 + (i % 2) * 310.0)
+					ms.scale = Vector2(1.2, 0.95)
+					ms.modulate = Color(1.0, 0.56, 0.44, 0.28)
+					_ambient_layer.add_child(ms)
+					_atmo_nodes.append({"node": ms, "kind": "drift", "vx": -18.0 - float(i) * 2.0, "vy": 0.0, "base_a": 0.40, "phase": float(i)})
+			for i in range(2):
+				if ff_tex:
+					var fs := Sprite2D.new()
+					fs.texture = ff_tex
+					fs.position = Vector2(88.0 + i * 1100.0, 340.0)
+					fs.scale = Vector2(0.48, 0.48)
+					fs.modulate = Color(1.0, 0.72, 0.36, 0.42)
+					_ambient_layer.add_child(fs)
+					_atmo_nodes.append({"node": fs, "kind": "bob", "vx": 0.0, "vy": 0.0, "base_y": fs.position.y, "base_a": 0.42, "phase": float(i) * 2.1})
 
 
 func _build_hud() -> void:
@@ -884,13 +930,13 @@ func _build_flame_counter() -> void:
 	_flame_hud_icon.texture = load("res://assets/sprites/ui/ui_spirit_flame.png") as Texture2D
 	_flame_hud_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	pill_wrap.add_child(_flame_hud_icon)
-	_flame_hud_icon.position = Vector2(16.0, 23.0)
+	_flame_hud_icon.position = Vector2(20.0, 32.0)
 	_flame_hud_icon.size = Vector2(40.0, 40.0)
 
 	_flame_label = Label.new()
 	_flame_label.text = str(spirit_flame)
-	_flame_label.position = Vector2(57.0, 23.0)
-	_flame_label.size = Vector2(91.0, 43.0)
+	_flame_label.position = Vector2(68.0, 29.0)
+	_flame_label.size = Vector2(82.0, 43.0)
 	_flame_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_flame_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_flame_label.add_theme_font_size_override("font_size", 27)
@@ -1186,8 +1232,7 @@ func _process(delta: float) -> void:
 
 	if _water_material:
 		_water_material.set_shader_parameter("water_time", _bg_time)
-		for i in range(_pond_koi.size()):
-			_pond_koi[i].frame = posmod(floori(_bg_time * 7.5) + i * 4, 12)
+		_update_pond_koi(delta / Engine.time_scale)
 
 	# Living flora breeze sway
 	for fl in _flora_nodes:
@@ -1410,8 +1455,8 @@ func _input(event: InputEvent) -> void:
 				if not is_dragging_card:
 					_handle_grid_tap(world_pos)
 			elif is_dragging_card:
+				is_dragging_card = false
 				_handle_grid_tap(world_pos)
-				_clear_selection()
 
 
 func _hud_contains(control: Control, viewport_pos: Vector2) -> bool:
@@ -1484,7 +1529,7 @@ func _handle_grid_tap(world_pos: Vector2) -> void:
 		return
 	if selected_defender_id != "":
 		if try_plant_defender(selected_defender_id, cell.x, cell.y, selected_card_idx):
-			_clear_selection()
+			_update_hover_preview(world_pos)
 
 
 func _on_card_pressed(did: String, idx: int) -> void:
@@ -1831,6 +1876,11 @@ func trigger_active_skill(sid: String) -> bool:
 
 func add_flame(amount: int) -> void:
 	spirit_flame += amount
+	_update_flame_hud()
+
+
+func drain_flame(amount: int) -> void:
+	spirit_flame = maxi(0, spirit_flame - amount)
 	_update_flame_hud()
 
 
@@ -2296,8 +2346,10 @@ func _step_auto_play_decision() -> void:
 			"ho_lo_bang":
 				lane_attackers[r] += 1
 				lane_has_ice[r] = true
-			"dao_tien", "tre_no", "nam_doc":
+			"dao_tien", "tre_no", "nam_doc", "hoa_phuong", "meo_kiem", "cung_sam":
 				lane_attackers[r] += 1
+			"daruma_buff":
+				healers += 1
 
 	# 7. Sort lanes by threat vs existing firepower
 	var sorted_lanes: Array[int] = [0, 1, 2, 3, 4]
@@ -2336,7 +2388,13 @@ func _step_auto_play_decision() -> void:
 		if lane_threats[r] > 0.0 and lane_attackers[r] == 0 and (lane_min_x[r] < 820.0 or producers >= 2):
 			if _ai_try_plant_in_cols("tre_no", r, [1, 2], ready_cards):
 				return
+			if _ai_try_plant_in_cols("cung_sam", r, [1, 2], ready_cards):
+				return
+			if _ai_try_plant_in_cols("hoa_phuong", r, [1, 2], ready_cards):
+				return
 			if _ai_try_plant_in_cols("ho_lo_bang", r, [1, 2], ready_cards):
+				return
+			if _ai_try_plant_in_cols("meo_kiem", r, [3, 2], ready_cards):
 				return
 			if _ai_try_plant_in_cols("dao_tien", r, [2, 1], ready_cards):
 				return
@@ -2380,7 +2438,15 @@ func _step_auto_play_decision() -> void:
 	for r in sorted_lanes:
 		if not lane_has_ice[r] and _ai_try_plant_in_cols("ho_lo_bang", r, [1, 2], ready_cards):
 			return
+		if _ai_try_plant_in_cols("hoa_phuong", r, [1, 2], ready_cards):
+			return
+		if _ai_try_plant_in_cols("cung_sam", r, [1, 2], ready_cards):
+			return
 		if _ai_try_plant_in_cols("tre_no", r, [1, 2], ready_cards):
+			return
+		if _ai_try_plant_in_cols("meo_kiem", r, [3, 2], ready_cards):
+			return
+		if _ai_try_plant_in_cols("daruma_buff", r, [2, 1], ready_cards):
 			return
 		if _ai_try_plant_in_cols("nam_doc", r, [3, 2], ready_cards):
 			return

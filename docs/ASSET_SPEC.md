@@ -183,3 +183,16 @@ Quy ước tên file: `<id>_<anim>.png` (VD: `tieu_yeu_walk.png`, `oni_lon_attac
 | **P0/P2** | `proj_ice_orb_anim` | Đạn cầu băng nhấp nháy | 6 frames (`3×2`) | [x] |
 | **P0/P2** | `proj_dart_poison_anim` | Đạn tên tre & bọt độc animation | `proj_bamboo_dart_anim` (`3×1`) & `proj_poison_glob_anim` (`3×1`) | [x] |
 | **P1/P2** | `gameplay_status_badges` | Badge trạng thái & khung đặt ô | 6 icons (`badge_*`) | [x] |
+
+### N. Bộ Nâng Cấp & Mở Rộng 18 Màn (6 Chương × 3 Màn)
+| Danh mục | Tên File / Gói Sheet | Chi tiết sau adapt | Trạng thái |
+| :--- | :--- | :--- | :---: |
+| **Cổng 3/4 Ch1–6** | `env_compact_gates_6ch_pack` | `gate_ch1_sakura_torii` .. `gate_ch6_volcano_torii` (3/4 nghiêng trái) | [x] |
+| **Vật cản Edo 3/4** | `obs_edo_fence_34`, `obs_edo_crate_kibako` | Thay mới `obs_wood_fence` (3/4 Edo), `obs_crate` (kibako dây rơm) (`2×2`) | [x] |
+| **Cá Koi bơi 360°** | `koi_kohaku_swim`, `koi_yamabuki_swim` | Ghép thành atlas `env_koi_water_anim` (`8×3` = `1024×384`) | [x] |
+| **4 Quân mới** | `hoa_phuong_*`, `daruma_buff_*`, `meo_kiem_*`, `cung_sam_*`, `defenders_new_icons_pack` | Idle (`3×2`), Action (`4×3`) & 4 icon thẻ bài | [x] |
+| **4 Yokai mới** | `karakasa_*`, `chochin_ma_*`, `tanuki_*`, `kappa_phap_su_*`, `enemies_new_icons_pack` | Walk/Attack/Die (`4×3`) & 4 icon Yokai | [x] |
+| **5 Boss Chương 2–6** | `boss_tengu_king_*`, `boss_kappa_lord_*`, `boss_shogun_*`, `boss_yuki_queen_*`, `boss_kyubi_*`, `bosses_icons_pack` | Move/Attack/Die (`4×4` = 192px) + 5 icon & `ui_ch6_emblem` | [x] |
+| **Chương 6 Hỏa Sơn** | `bg_ch6_blood_moon_shrine`, `tiles_ch6_obsidian_ash`, `env_ch6_border_house_flora_pack` | 4 nền, 12 gạch đá/tro (`tile_volcanic_stone_*`, `tile_ember_gravel_*`), viền/nhà/cây | [x] |
+| **3 Vật cản mới** | `obs_new_ice_block`, `obs_new_cursed_lantern`, `obs_new_incense_burner` | `obs_ice_block`, `obs_cursed_lantern`, `obs_incense_burner` (`2×2`) | [x] |
+| **Đạn & VFX mở rộng** | `fx_expansion_projectiles_pack` | `proj_phoenix_fireball`, `fx_chain_lightning_arc`, `fx_daruma_buff_ring`, `fx_katana_slash_wave`, `proj_kappa_water_orb`, `proj_kyubi_foxfire` | [x] |
