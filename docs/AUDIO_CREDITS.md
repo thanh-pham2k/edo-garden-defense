@@ -4,7 +4,7 @@ Tám bản dưới đây lấy từ bản nghe thử công khai của Freesound.
 
 | Âm thanh | Tác giả và nguồn | Cách dùng trong game |
 |---|---|---|
-| The Koto | [zacate](https://freesound.org/people/zacate/sounds/714936/) | Cắt đoạn 25 giây từ giây thứ 3, chuyển mono và nối chồng 1,2 giây để lặp. |
+| Happy Adventure (Loop) | [TinyWorlds (OpenGameArt, CC0)](https://opengameart.org/content/happy-adventure-loop) | Nhạc nền sinh động, vui nhộn và chill cho menu & chiến trường (Ogg Vorbis lặp liền mạch). |
 | Birds, wind through bamboo and a little waterstream | [tomasloos](https://freesound.org/people/tomasloos/sounds/843520/) | Cắt đoạn stereo 16 giây từ giây thứ 24 và nối chồng 1,2 giây để lặp dưới nhạc. |
 | Basic Click Wooden | [GameAudio](https://freesound.org/s/220200/) | Cắt tiếng click còn khoảng 0,22 giây. |
 | Soft Magic Spell Cast Whoosh | [Assetsmith](https://freesound.org/people/Assetsmith/sounds/876167/) | Cắt đoạn ngắn cho cánh hoa, băng và Nấm Độc. |
