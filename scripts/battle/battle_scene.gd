@@ -18,6 +18,7 @@ const BOTTOM_HUD_SCALE := 1.35
 const SAFE_AREA := preload("res://scripts/ui/safe_area.gd")
 const MAIN_MENU_PATH := "res://scenes/main/MainMenu.tscn"
 const SEED_CARD_SCRIPT := preload("res://scripts/ui/seed_card.gd")
+const WAVE_METER := preload("res://scripts/ui/wave_meter.gd")
 const DEFENDER_SCRIPT := preload("res://scripts/entities/defender.gd")
 const ENEMY_SCRIPT := preload("res://scripts/entities/enemy.gd")
 const PROJECTILE_SCRIPT := preload("res://scripts/entities/projectile.gd")
@@ -107,8 +108,7 @@ var _flame_label: Label
 var _flame_hud_icon: TextureRect
 var _seed_cards: Array = []
 var _wave_label: Label
-var _wave_fill_clip: Control
-var _wave_oni_head: TextureRect
+var _wave_meter: WAVE_METER
 var _shovel_btn: TextureButton
 var _speed_btn: TextureButton
 var _speed_badge: Label
@@ -752,42 +752,10 @@ func _build_hud() -> void:
 	_wave_label.add_theme_constant_override("outline_size", 4)
 	wave_wrap.add_child(_wave_label)
 
-	var bar_holder := Control.new()
-	bar_holder.custom_minimum_size = Vector2(180.0, 34.0)
-	bar_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	wave_wrap.add_child(bar_holder)
-
-	var bar_bg := TextureRect.new()
-	bar_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	bar_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	bar_bg.texture = load("res://assets/sprites/ui/ui_wave_bar.png") as Texture2D
-	bar_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bar_bg.modulate = Color(0.62, 0.56, 0.52, 1.0)
-	bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bar_holder.add_child(bar_bg)
-
-	_wave_fill_clip = Control.new()
-	_wave_fill_clip.position = Vector2(22.0, 10.0)
-	_wave_fill_clip.size = Vector2(136.0, 14.0)
-	_wave_fill_clip.clip_contents = true
-	_wave_fill_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bar_holder.add_child(_wave_fill_clip)
-
-	var bar_fill := ColorRect.new()
-	bar_fill.color = Color(0.24, 0.84, 0.22, 0.95)
-	bar_fill.size = Vector2(136.0, 14.0)
-	bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_wave_fill_clip.add_child(bar_fill)
-
-	_wave_oni_head = TextureRect.new()
-	_wave_oni_head.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_wave_oni_head.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_wave_oni_head.custom_minimum_size = Vector2(28.0, 28.0)
-	_wave_oni_head.texture = load("res://assets/sprites/ui/ui_oni_head.png") as Texture2D
-	_wave_oni_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bar_holder.add_child(_wave_oni_head)
-	_wave_oni_head.position = Vector2(16.0, 3.0)
-	_wave_oni_head.size = Vector2(28.0, 28.0)
+	_wave_meter = WAVE_METER.new()
+	_wave_meter.custom_minimum_size = Vector2(180.0, 40.0)
+	_wave_meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wave_wrap.add_child(_wave_meter)
 
 	# Shovel Button
 	_shovel_btn = _make_hud_icon_btn("res://assets/sprites/ui/ui_btn_shovel.png", Vector2(46, 46), "Xẻng thu hồi cây (Phím X)")
@@ -1951,11 +1919,8 @@ func _update_wave_hud() -> void:
 			_update_preparation_label(float(waves_arr[0]["delay"]))
 		else:
 			_wave_label.text = "Đợt %d / %d" % [_wave_index, total]
-	if total > 0 and _wave_fill_clip and _wave_oni_head:
-		var ratio := clampf(float(_wave_index) / float(total), 0.05, 1.0)
-		_wave_fill_clip.size.x = 136.0 * ratio
-		_wave_oni_head.position = Vector2(18.0 + 116.0 * ratio, 3.0)
-		_wave_oni_head.size = Vector2(28.0, 28.0)
+	if _wave_meter:
+		_wave_meter.set_wave(_wave_index, total)
 
 
 func _update_preparation_label(delay: float) -> void:
