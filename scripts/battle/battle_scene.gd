@@ -1455,8 +1455,8 @@ func _input(event: InputEvent) -> void:
 				if not is_dragging_card:
 					_handle_grid_tap(world_pos)
 			elif is_dragging_card:
-				is_dragging_card = false
 				_handle_grid_tap(world_pos)
+				_clear_selection()
 
 
 func _hud_contains(control: Control, viewport_pos: Vector2) -> bool:
@@ -1529,7 +1529,7 @@ func _handle_grid_tap(world_pos: Vector2) -> void:
 		return
 	if selected_defender_id != "":
 		if try_plant_defender(selected_defender_id, cell.x, cell.y, selected_card_idx):
-			_update_hover_preview(world_pos)
+			_clear_selection()
 
 
 func _on_card_pressed(did: String, idx: int) -> void:

@@ -103,8 +103,7 @@ func is_ready_to_plant(current_flame: int) -> bool:
 
 func start_cooldown() -> void:
 	cooldown_left = 0.0 if DISABLE_CARD_COOLDOWN else cooldown_total
-	if cooldown_left > 0.0:
-		is_selected = false
+	is_selected = false
 	_refresh_visual()
 
 
