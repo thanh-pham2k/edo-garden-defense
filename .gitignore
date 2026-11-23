@@ -18,6 +18,8 @@ mono_crash.*.json
 
 # Local Turso / cloud credentials (never commit secrets)
 cloud_config.cfg
+.env
+.env.local
 
 # Web build output and Vercel project metadata
 /build/

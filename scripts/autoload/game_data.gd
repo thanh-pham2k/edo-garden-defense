@@ -2141,7 +2141,7 @@ func _sanitize_player_id(raw: String) -> String:
 		var code := s.unicode_at(i)
 		var is_alpha := (code >= 65 and code <= 90) or (code >= 97 and code <= 122)
 		var is_digit := code >= 48 and code <= 57
-		if is_alpha or is_digit or code == 95 or code == 45:
+		if is_alpha or is_digit or code == 95 or code == 45 or code == 46:
 			out += char(code)
 	return out
 
@@ -2161,7 +2161,7 @@ func extract_uuid_from_query(raw_query: String) -> String:
 		var v := pair.substr(eq + 1).uri_decode()
 		if not kv.has(k):
 			kv[k] = v
-	for key in ["uuid", "user_id", "player_id", "uid"]:
+	for key in ["uuid", "user_id", "username", "player_id", "uid"]:
 		if kv.has(key):
 			var candidate := _sanitize_player_id(str(kv[key]))
 			if not candidate.is_empty():

@@ -182,6 +182,10 @@ func _run_all_tests() -> void:
 		game_data.extract_uuid_from_args(PackedStringArray(["--uuid=psa-cli-123"])) == "psa-cli-123",
 		"PSA uuid is extracted cleanly from CLI argument"
 	)
+	_assert(
+		game_data.extract_uuid_from_query("?user_id=thanhpv") == "thanhpv" and game_data.extract_uuid_from_query("?username=thanh.pv") == "thanh.pv",
+		"PSA username/user_id is extracted cleanly from URL query params"
+	)
 	var menu_scene := load("res://scenes/main/MainMenu.tscn") as PackedScene
 	var menu := menu_scene.instantiate()
 	root.add_child(menu)

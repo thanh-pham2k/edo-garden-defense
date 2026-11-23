@@ -11,6 +11,7 @@ const SYNC_DEBOUNCE_SEC := 0.6
 
 var allow_in_headless: bool = false
 
+var _api_url: String = ""
 var _base_url: String = ""
 var _auth_token: String = ""
 var _is_headless: bool = false
@@ -40,16 +41,49 @@ func _ready() -> void:
 
 
 func _load_credentials() -> void:
+	if OS.has_feature("web") and Engine.has_singleton("JavaScriptBridge"):
+		var origin := str(JavaScriptBridge.eval("window.location.origin"))
+		if origin.begins_with("http://") or origin.begins_with("https://"):
+			_api_url = _normalize_url(origin) + "/api/progress"
+			return
 	var cfg := ConfigFile.new()
 	if ResourceLoader.exists(CONFIG_PATH) or FileAccess.file_exists(CONFIG_PATH):
 		if cfg.load(CONFIG_PATH) == OK:
+			_api_url = _normalize_url(str(cfg.get_value("turso", "api_url", "")))
 			_base_url = str(cfg.get_value("turso", "url", ""))
 			_auth_token = str(cfg.get_value("turso", "auth_token", ""))
 	if _base_url.is_empty():
 		_base_url = OS.get_environment("TURSO_URL")
 	if _auth_token.is_empty():
 		_auth_token = OS.get_environment("TURSO_AUTH_TOKEN")
+	if (_base_url.is_empty() or _auth_token.is_empty()) and FileAccess.file_exists("res://.env"):
+		var env_vars := _parse_dotenv("res://.env")
+		if _base_url.is_empty():
+			_base_url = str(env_vars.get("TURSO_URL", ""))
+		if _auth_token.is_empty():
+			_auth_token = str(env_vars.get("TURSO_AUTH_TOKEN", ""))
 	_base_url = _normalize_url(_base_url)
+
+
+func _parse_dotenv(path: String) -> Dictionary:
+	var out: Dictionary = {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return out
+	while not f.eof_reached():
+		var line := f.get_line().strip_edges()
+		if line.is_empty() or line.begins_with("#"):
+			continue
+		var eq := line.find("=")
+		if eq <= 0:
+			continue
+		var k := line.left(eq).strip_edges()
+		var v := line.substr(eq + 1).strip_edges()
+		if (v.begins_with("\"") and v.ends_with("\"")) or (v.begins_with("'") and v.ends_with("'")):
+			if v.length() >= 2:
+				v = v.substr(1, v.length() - 2)
+		out[k] = v
+	return out
 
 
 func _normalize_url(raw: String) -> String:
@@ -61,8 +95,12 @@ func _normalize_url(raw: String) -> String:
 	return cleaned
 
 
+func _use_api_proxy() -> bool:
+	return not _api_url.is_empty()
+
+
 func is_configured() -> bool:
-	return not _base_url.is_empty() and not _auth_token.is_empty()
+	return _use_api_proxy() or (not _base_url.is_empty() and not _auth_token.is_empty())
 
 
 func _can_network() -> bool:
@@ -73,6 +111,14 @@ func _can_network() -> bool:
 
 func pull_progress(player_id: String) -> void:
 	if not _can_network() or player_id.is_empty():
+		return
+	if _use_api_proxy():
+		_enqueue({
+			"kind": "pull",
+			"proxy": true,
+			"method": HTTPClient.METHOD_GET,
+			"url": "%s?player_id=%s" % [_api_url, player_id.uri_encode()],
+		})
 		return
 	var reqs := [
 		{
@@ -106,6 +152,15 @@ func _on_debounce_timeout() -> void:
 		return
 	var snap := _pending_sync_snapshot.duplicate(true)
 	_pending_sync_snapshot.clear()
+	if _use_api_proxy():
+		_enqueue({
+			"kind": "sync",
+			"proxy": true,
+			"method": HTTPClient.METHOD_POST,
+			"url": _api_url,
+			"body": {"action": "sync", "snapshot": snap},
+		})
+		return
 	var reqs := [
 		_upsert_progress_stmt(snap),
 		{"type": "close"},
@@ -129,6 +184,23 @@ func record_level_completion(
 	# Clear any older debounced sync since this batch already persists the latest progress snapshot.
 	_pending_sync_snapshot.clear()
 	_debounce_timer.stop()
+	if _use_api_proxy():
+		_enqueue({
+			"kind": "completion",
+			"proxy": true,
+			"method": HTTPClient.METHOD_POST,
+			"url": _api_url,
+			"body": {
+				"action": "completion",
+				"snapshot": snapshot.duplicate(true),
+				"level_id": level_id,
+				"level_name": level_name,
+				"stars": stars,
+				"jade_reward": jade_reward,
+				"deck": deck.duplicate(),
+			},
+		})
+		return
 	var completed_at := int(snapshot.get("updated_at", Time.get_unix_time_from_system()))
 	var reqs := [
 		{
@@ -210,13 +282,24 @@ func _drain_queue() -> void:
 		return
 	_active_item = _queue.pop_front()
 	_in_flight = true
-	var endpoint := "%s/v2/pipeline" % _base_url
-	var headers := PackedStringArray([
-		"Authorization: Bearer %s" % _auth_token,
-		"Content-Type: application/json",
-	])
-	var payload := JSON.stringify({"requests": _active_item["requests"]})
-	var err := _http.request(endpoint, headers, HTTPClient.METHOD_POST, payload)
+	var err := OK
+	if bool(_active_item.get("proxy", false)):
+		var endpoint := str(_active_item.get("url", _api_url))
+		var method := int(_active_item.get("method", HTTPClient.METHOD_GET))
+		if method == HTTPClient.METHOD_GET:
+			err = _http.request(endpoint, PackedStringArray(), HTTPClient.METHOD_GET)
+		else:
+			var headers := PackedStringArray(["Content-Type: application/json"])
+			var payload := JSON.stringify(_active_item.get("body", {}))
+			err = _http.request(endpoint, headers, HTTPClient.METHOD_POST, payload)
+	else:
+		var endpoint := "%s/v2/pipeline" % _base_url
+		var headers := PackedStringArray([
+			"Authorization: Bearer %s" % _auth_token,
+			"Content-Type: application/json",
+		])
+		var payload := JSON.stringify({"requests": _active_item["requests"]})
+		err = _http.request(endpoint, headers, HTTPClient.METHOD_POST, payload)
 	if err != OK:
 		var kind := str(_active_item.get("kind", ""))
 		_in_flight = false
@@ -228,6 +311,7 @@ func _drain_queue() -> void:
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	var item := _active_item
 	var kind := str(item.get("kind", ""))
+	var is_proxy := bool(item.get("proxy", false))
 	_in_flight = false
 	_active_item = {}
 
@@ -237,6 +321,10 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		parsed = JSON.parse_string(body.get_string_from_utf8())
 		if typeof(parsed) != TYPE_DICTIONARY:
 			ok = false
+		elif is_proxy:
+			ok = bool(parsed.get("ok", false))
+			if not ok:
+				push_warning("CloudSync %s proxy error: %s" % [kind, str(parsed.get("error", ""))])
 		else:
 			for res in parsed.get("results", []):
 				if typeof(res) == TYPE_DICTIONARY and res.get("type", "") == "error":
@@ -245,7 +333,13 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 					break
 
 	if ok and kind == "pull":
-		var remote := _extract_progress_row(parsed)
+		var remote: Dictionary = {}
+		if is_proxy:
+			var p = parsed.get("progress", null)
+			if typeof(p) == TYPE_DICTIONARY:
+				remote = p
+		else:
+			remote = _extract_progress_row(parsed)
 		if not remote.is_empty():
 			remote_progress_loaded.emit(remote)
 
