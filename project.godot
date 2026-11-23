@@ -18,6 +18,7 @@ config/icon="res://assets/sprites/ui/ui_app_icon.png"
 
 [autoload]
 
+CloudSync="*res://scripts/autoload/cloud_sync.gd"
 GameData="*res://scripts/autoload/game_data.gd"
 AudioManager="*res://scripts/autoload/audio_manager.gd"
 

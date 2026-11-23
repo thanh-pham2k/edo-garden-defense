@@ -13,7 +13,16 @@ const LANE_CONTACT_OFFSET := 24.0
 const SAVE_PATH := "user://edo_save.json"
 const MAX_DECK_SIZE := 8
 const NORMAL_BATTLE_SPEED := 0.90
+const DEFAULT_DECK: Array[String] = [
+	"than_den", "dao_tien", "tre_no", "bi_ngo",
+	"nam_doc", "ho_lo_bang", "phao_hoa", "gio_loc"
+]
 
+signal progress_changed
+
+var player_id: String = ""
+var is_external_player: bool = false
+var save_updated_at: int = 0
 var selected_level: int = 1
 var selected_deck: Array[String] = [
 	"than_den", "dao_tien", "tre_no", "bi_ngo",
@@ -1884,7 +1893,19 @@ const LEVELS: Array[Dictionary] = [
 
 
 func _ready() -> void:
+	var ext_id := _resolve_external_player_id()
+	if not ext_id.is_empty():
+		player_id = ext_id
+		is_external_player = true
 	load_progress()
+	if player_id.is_empty():
+		player_id = _generate_player_id()
+		_write_local_save()
+	var cloud := get_node_or_null("/root/CloudSync")
+	if cloud:
+		if not cloud.remote_progress_loaded.is_connected(_on_remote_progress_loaded):
+			cloud.remote_progress_loaded.connect(_on_remote_progress_loaded)
+		cloud.pull_progress(player_id)
 	var args := OS.get_cmdline_args()
 	var user_args := OS.get_cmdline_user_args()
 	if args.has("--autoplay-5x-10m") or user_args.has("--autoplay-5x-10m"):
@@ -2067,7 +2088,11 @@ func record_level_win(level_id: int, stars: int) -> int:
 		unlocked_level = level_id + 1
 	var reward := get_victory_jade_reward(stars)
 	jade_gems += reward
-	save_progress()
+	save_progress(false)
+	var cloud := get_node_or_null("/root/CloudSync")
+	if cloud:
+		var lvl_name := str(get_level_config(level_id).get("name", ""))
+		cloud.record_level_completion(build_save_snapshot(), level_id, lvl_name, stars, reward, selected_deck)
 	return reward
 
 
@@ -2076,32 +2101,213 @@ func unlock_all_levels() -> void:
 	save_progress()
 
 
-func save_progress() -> void:
-	var data := {
+func build_save_snapshot() -> Dictionary:
+	return {
+		"player_id": player_id,
 		"unlocked_level": unlocked_level,
-		"level_stars": level_stars,
-		"selected_deck": selected_deck,
-		"previous_deck": previous_deck,
+		"level_stars": level_stars.duplicate(true),
+		"selected_deck": selected_deck.duplicate(),
+		"previous_deck": previous_deck.duplicate(),
 		"jade_gems": jade_gems,
-		"unlocked_upgrades": unlocked_upgrades,
+		"unlocked_upgrades": unlocked_upgrades.duplicate(),
 		"auto_collect_flame": auto_collect_flame,
 		"sound_muted": sound_muted,
-		"audio_layers": audio_layers,
+		"audio_layers": audio_layers.duplicate(true),
+		"updated_at": save_updated_at,
 	}
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+
+
+func save_progress(sync_cloud: bool = true) -> void:
+	if player_id.is_empty():
+		player_id = _generate_player_id()
+	save_updated_at = int(Time.get_unix_time_from_system())
+	_write_local_save()
+	if sync_cloud:
+		var cloud := get_node_or_null("/root/CloudSync")
+		if cloud:
+			cloud.sync_progress(build_save_snapshot())
+
+
+func _current_save_path() -> String:
+	if is_external_player and not player_id.is_empty():
+		return "user://edo_save_%s.json" % player_id
+	return SAVE_PATH
+
+
+func _sanitize_player_id(raw: String) -> String:
+	var s := raw.strip_edges()
+	var out := ""
+	for i in range(mini(s.length(), 128)):
+		var code := s.unicode_at(i)
+		var is_alpha := (code >= 65 and code <= 90) or (code >= 97 and code <= 122)
+		var is_digit := code >= 48 and code <= 57
+		if is_alpha or is_digit or code == 95 or code == 45:
+			out += char(code)
+	return out
+
+
+func extract_uuid_from_query(raw_query: String) -> String:
+	var cleaned := raw_query.strip_edges().replace("#", "&")
+	while cleaned.begins_with("?") or cleaned.begins_with("&"):
+		cleaned = cleaned.substr(1)
+	if cleaned.is_empty():
+		return ""
+	var kv: Dictionary = {}
+	for pair in cleaned.split("&", false):
+		var eq := pair.find("=")
+		if eq <= 0:
+			continue
+		var k := pair.left(eq).uri_decode().strip_edges().to_lower()
+		var v := pair.substr(eq + 1).uri_decode()
+		if not kv.has(k):
+			kv[k] = v
+	for key in ["uuid", "user_id", "player_id", "uid"]:
+		if kv.has(key):
+			var candidate := _sanitize_player_id(str(kv[key]))
+			if not candidate.is_empty():
+				return candidate
+	return ""
+
+
+func extract_uuid_from_args(args: PackedStringArray) -> String:
+	var n := args.size()
+	for i in range(n):
+		var arg := str(args[i]).strip_edges()
+		for prefix in ["--uuid=", "--user-id=", "--player-id=", "--uid="]:
+			if arg.begins_with(prefix):
+				var candidate := _sanitize_player_id(arg.substr(prefix.length()).uri_decode())
+				if not candidate.is_empty():
+					return candidate
+		if arg in ["--uuid", "--user-id", "--player-id", "--uid"] and i + 1 < n:
+			var candidate := _sanitize_player_id(str(args[i + 1]).uri_decode())
+			if not candidate.is_empty():
+				return candidate
+		var q_pos := arg.find("?")
+		var h_pos := arg.find("#")
+		var query_part := ""
+		if q_pos >= 0:
+			query_part = arg.substr(q_pos + 1)
+		elif h_pos >= 0:
+			query_part = arg.substr(h_pos + 1)
+		elif arg.contains("uuid=") or arg.contains("user_id=") or arg.contains("player_id="):
+			query_part = arg
+		if not query_part.is_empty():
+			var candidate := extract_uuid_from_query(query_part)
+			if not candidate.is_empty():
+				return candidate
+	return ""
+
+
+func _resolve_external_player_id() -> String:
+	if OS.has_feature("web") and Engine.has_singleton("JavaScriptBridge"):
+		var raw_web := str(JavaScriptBridge.eval("window.location.search + '&' + window.location.hash"))
+		var from_web := extract_uuid_from_query(raw_web)
+		if not from_web.is_empty():
+			return from_web
+	var from_user_args := extract_uuid_from_args(OS.get_cmdline_user_args())
+	if not from_user_args.is_empty():
+		return from_user_args
+	var from_args := extract_uuid_from_args(OS.get_cmdline_args())
+	if not from_args.is_empty():
+		return from_args
+	for env_key in ["PSA_USER_UUID", "PLAYER_UUID"]:
+		var from_env := _sanitize_player_id(OS.get_environment(env_key))
+		if not from_env.is_empty():
+			return from_env
+	return ""
+
+
+func _reset_progress_to_defaults() -> void:
+	selected_level = 1
+	unlocked_level = 1
+	level_stars = {}
+	jade_gems = 15
+	unlocked_upgrades.clear()
+	selected_deck.assign(DEFAULT_DECK)
+	previous_deck.clear()
+	save_updated_at = 0
+
+
+func set_external_player_id(raw_uuid: String) -> bool:
+	var clean_id := _sanitize_player_id(raw_uuid)
+	if clean_id.is_empty():
+		return false
+	player_id = clean_id
+	is_external_player = true
+	_reset_progress_to_defaults()
+	load_progress()
+	progress_changed.emit()
+	var cloud := get_node_or_null("/root/CloudSync")
+	if cloud:
+		cloud.pull_progress(player_id)
+	return true
+
+
+func _write_local_save() -> void:
+	var data := build_save_snapshot()
+	var f := FileAccess.open(_current_save_path(), FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(data))
 
 
-func load_progress() -> void:
-	if not FileAccess.file_exists(SAVE_PATH):
+func _generate_player_id() -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	return "edo_%08x%08x" % [rng.randi(), rng.randi()]
+
+
+func _on_remote_progress_loaded(remote: Dictionary) -> void:
+	if str(remote.get("player_id", "")) != player_id:
 		return
-	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	var remote_updated := int(remote.get("updated_at", 0))
+	unlocked_level = maxi(unlocked_level, clampi(int(remote.get("unlocked_level", 1)), 1, LEVELS.size()))
+	var r_stars = remote.get("level_stars", {})
+	if typeof(r_stars) == TYPE_DICTIONARY:
+		for k in r_stars.keys():
+			var sk := str(k)
+			level_stars[sk] = maxi(int(level_stars.get(sk, 0)), clampi(int(r_stars[k]), 0, 3))
+	var r_upg = remote.get("unlocked_upgrades", [])
+	if typeof(r_upg) == TYPE_ARRAY:
+		for u in r_upg:
+			var su := str(u)
+			if GARDEN_UPGRADES.has(su) and not unlocked_upgrades.has(su):
+				unlocked_upgrades.append(su)
+	if remote_updated > save_updated_at:
+		jade_gems = maxi(0, int(remote.get("jade_gems", jade_gems)))
+		var r_sel := valid_deck(remote.get("selected_deck", []))
+		if not r_sel.is_empty():
+			selected_deck.assign(r_sel)
+		var r_prev := valid_deck(remote.get("previous_deck", []))
+		if not r_prev.is_empty():
+			previous_deck = r_prev
+		var r_settings = remote.get("settings", {})
+		if typeof(r_settings) == TYPE_DICTIONARY:
+			auto_collect_flame = bool(r_settings.get("auto_collect_flame", auto_collect_flame))
+			sound_muted = bool(r_settings.get("sound_muted", sound_muted))
+			var r_layers = r_settings.get("audio_layers", {})
+			if typeof(r_layers) == TYPE_DICTIONARY:
+				for layer in audio_layers:
+					audio_layers[layer] = bool(r_layers.get(layer, audio_layers[layer]))
+		save_updated_at = remote_updated
+	_write_local_save()
+	progress_changed.emit()
+
+
+func load_progress() -> void:
+	var path := _current_save_path()
+	if not FileAccess.file_exists(path):
+		return
+	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
 		return
 	var parsed = JSON.parse_string(f.get_as_text())
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return
+	if not is_external_player:
+		player_id = str(parsed.get("player_id", ""))
+	elif player_id.is_empty():
+		player_id = str(parsed.get("player_id", ""))
+	save_updated_at = maxi(0, int(parsed.get("updated_at", 0)))
 	unlocked_level = clampi(int(parsed.get("unlocked_level", 1)), 1, LEVELS.size())
 	jade_gems = maxi(0, int(parsed.get("jade_gems", 15)))
 	var upg_raw = parsed.get("unlocked_upgrades", [])

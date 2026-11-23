@@ -34,6 +34,8 @@ func _ready() -> void:
 	AudioManager.start_bgm()
 	_build_ui()
 	_refresh_ui()
+	if not GameData.progress_changed.is_connected(_refresh_ui):
+		GameData.progress_changed.connect(_refresh_ui)
 	if GameData.auto_play_active:
 		GameData.prepare_auto_play_loadout(GameData.selected_level)
 		_refresh_ui()

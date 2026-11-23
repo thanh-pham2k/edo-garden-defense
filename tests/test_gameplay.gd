@@ -170,6 +170,18 @@ func _run_all_tests() -> void:
 		_assert(ResourceLoader.exists(extra_path), "Missing adapted sprite " + extra_path)
 
 	# 2. Test MainMenu instantiation & deck toggling
+	_assert(
+		game_data.extract_uuid_from_query("?foo=1&uuid=550e8400-e29b-41d4-a716-446655440000") == "550e8400-e29b-41d4-a716-446655440000",
+		"PSA uuid is extracted cleanly from URL query params"
+	)
+	_assert(
+		game_data.extract_uuid_from_args(PackedStringArray(["edogarden://play?uuid=psa-user-999"])) == "psa-user-999",
+		"PSA uuid is extracted cleanly from deep-link URI argument"
+	)
+	_assert(
+		game_data.extract_uuid_from_args(PackedStringArray(["--uuid=psa-cli-123"])) == "psa-cli-123",
+		"PSA uuid is extracted cleanly from CLI argument"
+	)
 	var menu_scene := load("res://scenes/main/MainMenu.tscn") as PackedScene
 	var menu := menu_scene.instantiate()
 	root.add_child(menu)
